@@ -10,6 +10,7 @@ import {
 } from "@/components/marketing/sections";
 import { LegalNote } from "@/components/marketing/sections";
 import { landings } from "@/content/landings";
+import { getCompanySettings } from "@/lib/services/catalog";
 
 export const metadata: Metadata = {
   title: "Vistoria de entrega, orçamento e gestão de obra",
@@ -26,8 +27,9 @@ export const metadata: Metadata = {
  * rápido e tem o ciclo de venda mais curto. Os outros aparecem logo abaixo,
  * cada um levando à sua própria landing.
  */
-export default function HomePage() {
+export default async function HomePage() {
   const primary = landings[0];
+  const company = await getCompanySettings();
 
   return (
     <>
@@ -42,6 +44,7 @@ export default function HomePage() {
         origin="home"
         formTitle="Agendar vistoria"
         ctaLabel="Agendar vistoria"
+        whatsappNumber={company.whatsapp ?? company.phone}
       />
 
       <ProblemSection

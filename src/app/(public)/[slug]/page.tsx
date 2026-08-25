@@ -10,6 +10,7 @@ import {
   StepsSection,
 } from "@/components/marketing/sections";
 import { findLanding, landings } from "@/content/landings";
+import { getCompanySettings } from "@/lib/services/catalog";
 
 /**
  * Landing de serviço.
@@ -23,6 +24,13 @@ export function generateStaticParams() {
 }
 
 export const dynamicParams = false;
+
+/**
+ * Renderizada por requisição: o atalho de WhatsApp da confirmação vem de
+ * `CompanySettings`. Gerar no build faria o deploy depender do banco e
+ * congelaria o número até a próxima publicação.
+ */
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata(props: PageProps<"/[slug]">): Promise<Metadata> {
   const { slug } = await props.params;
@@ -47,6 +55,8 @@ export default async function LandingPage(props: PageProps<"/[slug]">) {
   const { slug } = await props.params;
   const landing = findLanding(slug);
   if (!landing) notFound();
+
+  const company = await getCompanySettings();
 
   const faqJsonLd = {
     "@context": "https://schema.org",
@@ -74,6 +84,7 @@ export default async function LandingPage(props: PageProps<"/[slug]">) {
         origin={landing.slug}
         formTitle={landing.formTitle}
         ctaLabel={landing.ctaLabel}
+        whatsappNumber={company.whatsapp ?? company.phone}
       />
 
       <ProblemSection

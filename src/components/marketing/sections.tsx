@@ -19,6 +19,7 @@ export function Hero({
   origin,
   formTitle,
   ctaLabel,
+  whatsappNumber,
 }: {
   eyebrow: string;
   title: string;
@@ -27,6 +28,7 @@ export function Hero({
   origin: string;
   formTitle: string;
   ctaLabel: string;
+  whatsappNumber?: string | null;
 }) {
   return (
     <section className="border-b border-ink-200 bg-surface">
@@ -54,11 +56,14 @@ export function Hero({
           id="agendar"
           className="scroll-mt-20 rounded-card border border-ink-200 bg-paper p-5 shadow-raised sm:p-6"
         >
-          <h2 className="text-base font-semibold tracking-tight text-ink-900">{formTitle}</h2>
-          <p className="mb-4 mt-1 text-sm text-ink-500">
-            Resposta pelo WhatsApp, normalmente no mesmo dia.
-          </p>
-          <LeadForm serviceCode={serviceCode} origin={origin} submitLabel={ctaLabel} />
+          <LeadForm
+            serviceCode={serviceCode}
+            origin={origin}
+            title={formTitle}
+            subtitle="Resposta pelo WhatsApp, normalmente no mesmo dia."
+            submitLabel={ctaLabel}
+            whatsappNumber={whatsappNumber}
+          />
         </div>
       </div>
     </section>
