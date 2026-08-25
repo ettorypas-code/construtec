@@ -28,13 +28,19 @@ Você precisa de duas, e elas são diferentes de propósito:
 | Variável | Qual copiar | Porta | Para quê |
 |---|---|---|---|
 | `DATABASE_URL` | **Transaction pooler** | 6543 | a aplicação |
-| `DIRECT_URL` | **Direct connection** | 5432 | as migrações |
+| `DIRECT_URL` | **Session pooler** | 5432 | as migrações |
 
-Em ambas, troque `[YOUR-PASSWORD]` pela senha do passo 1.1.
+**As duas são do pooler.** Em ambas, troque `[YOUR-PASSWORD]` pela senha do
+passo 1.1.
 
-> São duas porque o pooler em modo *transaction* não suporta os comandos que
-> uma migração precisa executar. Usar só o pooler faz a migração falhar; usar
-> só a conexão direta esgota o limite de conexões da aplicação.
+> São duas porque o *transaction pooler* não suporta os comandos que uma
+> migração precisa executar.
+>
+> **Não use a "Direct connection"** (`db.xxx.supabase.co`) em `DIRECT_URL`. Ela
+> tem apenas registro DNS `AAAA` — existe só em IPv6 — e a Vercel é IPv4. O
+> build falha com `P1001: Can't reach database server`. Da sua máquina pode
+> funcionar, se o seu provedor tiver IPv6, o que torna o erro especialmente
+> traiçoeiro: passa no teste local e quebra no deploy.
 
 Na `DATABASE_URL`, mantenha no fim: `?pgbouncer=true&connection_limit=1`
 
@@ -123,7 +129,7 @@ Antes de clicar em Deploy, abra **Environment Variables** e cadastre:
 | Variável | Valor |
 |---|---|
 | `DATABASE_URL` | pooler, porta 6543 (passo 1.2) |
-| `DIRECT_URL` | conexão direta, porta 5432 (passo 1.2) |
+| `DIRECT_URL` | **session pooler**, porta 5432 (passo 1.2) |
 | `SESSION_SECRET` | primeira chave do passo 2 |
 | `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` | segunda chave do passo 2 |
 | `CRON_SECRET` | terceira chave do passo 2 |
@@ -156,8 +162,8 @@ partir do seu computador, apontando para o banco de produção.
 Crie um arquivo `.env.production.local` na pasta do projeto:
 
 ```
-DATABASE_URL="<a mesma do passo 1.2, pooler>"
-DIRECT_URL="<a mesma do passo 1.2, direta>"
+DATABASE_URL="<transaction pooler, 6543>"
+DIRECT_URL="<session pooler, 5432>"
 SEED_ADMIN_EMAIL="seu@email.com"
 SEED_ADMIN_PASSWORD="sua-senha-forte"
 ```
@@ -171,7 +177,7 @@ npx dotenv -e .env.production.local -- npm run db:seed
 Se o `dotenv` não estiver disponível, dá para fazer direto:
 
 ```powershell
-$env:DATABASE_URL="<pooler>"; $env:DIRECT_URL="<direta>"; npm run db:seed
+$env:DATABASE_URL="<transaction pooler>"; $env:DIRECT_URL="<session pooler>"; npm run db:seed
 ```
 
 > O seed é idempotente: pode rodar de novo sem duplicar nada.

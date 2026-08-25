@@ -8,6 +8,7 @@
  *   npx tsx scripts/verificar-supabase.ts
  */
 
+import { resolve4 } from "node:dns/promises";
 import { PrismaClient } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 
@@ -56,13 +57,17 @@ function verificarUrls() {
     add(false, "DIRECT_URL definida", "As migrações falham sem ela");
   } else {
     add(true, "DIRECT_URL definida");
-    // O erro nº 2: apontar DIRECT_URL para o pooler. A migração falha no meio.
+    // Precisa ser o SESSION pooler: porta 5432 no host do pooler. Transaction
+    // pooler (6543) não suporta os comandos de migração; conexão direta
+    // (db.xxx) só existe em IPv6 e a Vercel não alcança.
     add(
-      direct.includes(":5432"),
-      "DIRECT_URL usa conexão direta (porta 5432)",
+      direct.includes(":5432") && direct.includes("pooler.supabase.com"),
+      "DIRECT_URL usa o session pooler (porta 5432)",
       direct.includes(":6543")
-        ? "Está com a porta 6543 (pooler). Use a string do Direct connection."
-        : undefined,
+        ? "Está na porta 6543 (transaction pooler). Use a string do Session pooler."
+        : direct.includes("db.")
+          ? "Está com a Direct connection (db.xxx), que só existe em IPv6. Use o Session pooler."
+          : undefined,
     );
   }
 
@@ -71,6 +76,37 @@ function verificarUrls() {
     "As duas URLs são diferentes",
     url === direct ? "Você colou a mesma string nas duas." : undefined,
   );
+}
+
+/**
+ * Confere se os hosts existem em IPv4.
+ *
+ * A "Direct connection" do Supabase (db.xxx.supabase.co) tem apenas registro
+ * AAAA — só existe em IPv6. A Vercel é IPv4, então o build morre com P1001.
+ * Da máquina de quem tem IPv6 em casa funciona, o que faz o erro passar
+ * despercebido até o deploy. Esta verificação existe para pegá-lo antes.
+ */
+async function verificarIPv4() {
+  for (const [nome, valor] of [
+    ["DATABASE_URL", process.env.DATABASE_URL],
+    ["DIRECT_URL", process.env.DIRECT_URL],
+  ] as const) {
+    const host = valor?.match(/@([^:/?]+)/)?.[1];
+    if (!host) continue;
+
+    try {
+      const enderecos = await resolve4(host);
+      add(enderecos.length > 0, `${nome}: host acessível por IPv4`);
+    } catch {
+      add(
+        false,
+        `${nome}: host acessível por IPv4`,
+        host.startsWith("db.")
+          ? `${host} só existe em IPv6. Use o pooler (aws-...pooler.supabase.com), não a Direct connection.`
+          : `${host} não resolveu em IPv4. A Vercel não vai alcançar.`,
+      );
+    }
+  }
 }
 
 async function verificarBanco() {
@@ -174,6 +210,7 @@ async function main() {
 
   verificarUrls();
   verificarChaves();
+  await verificarIPv4();
   await verificarBanco();
   await verificarStorage();
 
