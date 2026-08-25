@@ -53,6 +53,9 @@ export default async function LibraryPage() {
     getCompanySettings(),
   ]);
 
+  const mainServices = services.filter((service) => !service.isAddon);
+  const addonServices = services.filter((service) => service.isAddon);
+
   const findingsByCategory = new Map<string, typeof findings>();
   for (const finding of findings) {
     const list = findingsByCategory.get(finding.category) ?? [];
@@ -70,7 +73,7 @@ export default async function LibraryPage() {
       <section className="space-y-3">
         <SectionHeading title="Catálogo de serviços" />
         <div className="grid gap-3 lg:grid-cols-2">
-          {services.map((service) => {
+          {mainServices.map((service) => {
             const availability = checkServiceAvailability(service, company);
             const restriction = service.restrictionLevel as RestrictionLevel;
 
@@ -98,7 +101,26 @@ export default async function LibraryPage() {
                     <p className="text-sm leading-relaxed text-ink-600">{service.shortPitch}</p>
                   ) : null}
 
-                  {service.basePriceCents ? (
+                  {service.priceTiers.length > 0 ? (
+                    <div>
+                      <ul className="divide-y divide-ink-100 rounded-control border border-ink-200">
+                        {service.priceTiers.map((tier) => (
+                          <li
+                            key={tier.id}
+                            className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-sm"
+                          >
+                            <span className="text-ink-600">{tier.label}</span>
+                            <span className="shrink-0 font-medium tabular text-ink-900">
+                              {tier.priceCents > 0 ? formatBRL(tier.priceCents) : "sob orçamento"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      {service.priceNote ? (
+                        <p className="mt-1.5 text-xs text-ink-400">{service.priceNote}</p>
+                      ) : null}
+                    </div>
+                  ) : service.basePriceCents ? (
                     <p className="text-sm tabular text-ink-700">
                       A partir de {formatBRL(service.basePriceCents)}
                       {service.priceNote ? (
@@ -124,6 +146,37 @@ export default async function LibraryPage() {
           })}
         </div>
       </section>
+
+      {addonServices.length > 0 ? (
+        <section className="space-y-3">
+          <SectionHeading title="Adicionais" />
+          <p className="-mt-1 text-sm leading-relaxed text-ink-500">
+            Cobrados sobre um serviço-base. Existem porque é aqui que o custo varia de
+            verdade — uma revistoria é uma viagem inteira a mais. Classificar ocorrência
+            por gravidade, ao contrário, o sistema faz sozinho e nunca vira adicional.
+          </p>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {addonServices.map((service) => (
+              <Card key={service.id}>
+                <CardBody className="space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-medium text-ink-900">{service.name}</p>
+                    <span className="shrink-0 text-sm font-semibold tabular text-ink-900">
+                      {service.basePriceCents ? formatBRL(service.basePriceCents) : "sob consulta"}
+                    </span>
+                  </div>
+                  {service.shortPitch ? (
+                    <p className="text-sm leading-relaxed text-ink-600">{service.shortPitch}</p>
+                  ) : null}
+                  {service.priceNote ? (
+                    <p className="text-xs text-ink-400">{service.priceNote}</p>
+                  ) : null}
+                </CardBody>
+              </Card>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="space-y-3">
         <SectionHeading title="Modelos de checklist" />
