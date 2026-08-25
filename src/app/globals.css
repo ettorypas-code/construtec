@@ -1,26 +1,148 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   CONSTRUTEC — Sistema de design
+   Identidade: grafite técnico + petróleo, sobre papel quente.
+   Nada de gradiente decorativo. A cor carrega significado: petróleo = ação,
+   e a escala de gravidade é a única outra fonte de cor forte na interface.
+   ========================================================================== */
+
+@theme {
+  /* -- Neutros (papel quente → grafite) --------------------------------- */
+  --color-paper: #fbfaf8;
+  --color-surface: #ffffff;
+  --color-ink-50: #f6f6f5;
+  --color-ink-100: #ececeb;
+  --color-ink-200: #dcdcda;
+  --color-ink-300: #bfbfbc;
+  --color-ink-400: #8e8e8a;
+  --color-ink-500: #6b6b67;
+  --color-ink-600: #52524f;
+  --color-ink-700: #3d3d3b;
+  --color-ink-800: #262625;
+  --color-ink-900: #161615;
+
+  /* -- Petróleo (ação, links, foco) ------------------------------------- */
+  --color-brand-50: #eefaf9;
+  --color-brand-100: #d3f2f0;
+  --color-brand-200: #a8e5e2;
+  --color-brand-300: #71d0cd;
+  --color-brand-400: #3fb3b1;
+  --color-brand-500: #219593;
+  --color-brand-600: #0e7c86;
+  --color-brand-700: #0f616b;
+  --color-brand-800: #114e56;
+  --color-brand-900: #113f47;
+
+  /* -- Gravidade / severidade ------------------------------------------- */
+  --color-critical: #b91c1c;
+  --color-critical-soft: #fef2f2;
+  --color-high: #c2410c;
+  --color-high-soft: #fff7ed;
+  --color-medium: #a16207;
+  --color-medium-soft: #fefce8;
+  --color-low: #475569;
+  --color-low-soft: #f8fafc;
+
+  /* -- Estado ------------------------------------------------------------ */
+  --color-success: #15803d;
+  --color-success-soft: #f0fdf4;
+  --color-warning: #b45309;
+  --color-warning-soft: #fffbeb;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fef2f2;
+  --color-info: #0e7c86;
+  --color-info-soft: #eefaf9;
+
+  /* -- Tipografia -------------------------------------------------------- */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* -- Raio e sombra ------------------------------------------------------ */
+  --radius-card: 0.75rem;
+  --radius-control: 0.5rem;
+
+  --shadow-subtle: 0 1px 2px 0 rgb(22 22 21 / 0.05);
+  --shadow-raised: 0 1px 3px 0 rgb(22 22 21 / 0.08), 0 1px 2px -1px rgb(22 22 21 / 0.06);
+  --shadow-overlay: 0 16px 40px -12px rgb(22 22 21 / 0.22);
+
+  /* -- Alturas de toque (mobile: nunca abaixo de 44px) -------------------- */
+  --spacing-touch: 2.75rem;
+  --spacing-touch-lg: 3.5rem;
+}
+
+/* Modo escuro está preparado, mas desligado no MVP: uma ferramenta de trabalho
+   deve ter aparência previsível. Para ligar, basta adicionar `.dark` no <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@layer base {
+  * {
+    border-color: var(--color-ink-200);
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink-800);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Impede o zoom automático do iOS ao focar um campo. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  @media (min-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: inherit;
+    }
+  }
+
+  /* Números tabulares em qualquer lugar que mostre dinheiro ou quantidade. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer utilities {
+  /* Área segura para a barra de navegação inferior no iOS. */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .h-safe-bottom {
+    height: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
 }

@@ -1,0 +1,973 @@
+// CONSTRUTEC — modelo de dados
+//
+// PostgreSQL em desenvolvimento e em produção — o mesmo banco, o mesmo dialeto,
+// as mesmas restrições. Ver ARQUITETURA.md, decisão D2.
+//
+// O schema continua escrito de forma conservadora, herança do período em que
+// rodava também em SQLite, e não há motivo para desfazer:
+//   • nenhum `enum` nativo  → String, com o vocabulário em src/domain/enums.ts
+//     (renomear um rótulo deixa de exigir migração)
+//   • nenhuma lista escalar → tabela filha ou JSON serializado em String
+//
+// Dinheiro é SEMPRE Int em centavos. Percentuais e quantidades são Float.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Pooler do Supabase para a aplicação; conexão direta para as migrações,
+  // que o pooler em modo transaction não suporta.
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================================
+//  IDENTIDADE E CONFIGURAÇÃO
+// ============================================================================
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         String    @default("ADMIN") // UserRole
+  phone        String?
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  client         Client?
+  partner        Partner?
+  notifications  Notification[]
+  activityLogs   ActivityLog[]
+  aiInteractions AIInteraction[]
+
+  @@index([role])
+}
+
+/// Registro único com os dados da empresa e — crucialmente — a habilitação
+/// profissional. É esse bloco que a guarda de terminologia consulta para
+/// decidir que documentos podem ser emitidos. Ver src/lib/compliance.
+model CompanySettings {
+  id          String  @id @default("default")
+  name        String
+  legalName   String?
+  document    String? // CNPJ ou CPF
+  email       String?
+  phone       String?
+  whatsapp    String?
+  website     String?
+  addressLine String?
+  city        String?
+  state       String?
+  zipCode     String?
+  logoKey     String?
+
+  // Habilitação profissional
+  professionalName  String?
+  professionalTitle String?
+  councilType       String  @default("NENHUM") // CouncilType
+  councilNumber     String?
+  canIssueArt       Boolean @default(false)
+
+  // Padrões comerciais
+  defaultBdiPercent      Float   @default(25)
+  defaultValidityDays    Int     @default(15)
+  defaultPaymentTerms    String?
+  proposalFooterNotes    String?
+  reportFooterNotes      String?
+  proposalNumberSequence Int     @default(1)
+  reportNumberSequence   Int     @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Trilha de atividade. Alimenta a timeline do dashboard e serve de registro de
+/// acesso a dados pessoais para fins de LGPD.
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  summary    String
+  metadata   String? // JSON
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+// ============================================================================
+//  CATÁLOGO E BIBLIOTECAS CONFIGURÁVEIS
+// ============================================================================
+
+/// Catálogo de serviços. Carrega as regras legais de cada serviço: se exige
+/// responsável técnico, se exige ART/RRT e qual documento pode gerar.
+model ServiceType {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  category    String // ServiceCategory
+  shortPitch  String?
+  description String?
+
+  basePriceCents Int?
+  priceNote      String?
+
+  restrictionLevel             String  @default("LIVRE") // RestrictionLevel
+  requiresTechnicalResponsible Boolean @default(false)
+  requiresArtRrt               Boolean @default(false)
+  legalNotes                   String?
+  defaultDocumentKind          String? // DocumentKind
+
+  /// Adicional cobrado sobre um serviço-base (revistoria, memorial, deslocamento).
+  /// Não aparece como serviço principal no catálogo público.
+  isAddon Boolean @default(false)
+
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leads       Lead[]
+  inspections Inspection[]
+  proposals   Proposal[]
+  budgets     Budget[]
+  checklists  ChecklistTemplate[]
+  priceTiers  ServicePriceTier[]
+
+  @@index([category, active])
+}
+
+/// Faixa de preço por metragem.
+///
+/// Vistoria de 45 m² e de 180 m² não custam o mesmo, e um preço único obriga a
+/// escolher entre perder o serviço pequeno ou trabalhar de graça no grande.
+model ServicePriceTier {
+  id            String  @id @default(cuid())
+  serviceTypeId String
+  label         String
+  /// Limite superior da faixa, em m². Nulo = "acima disso".
+  maxAreaSqm    Float?
+  priceCents    Int
+  note          String?
+  sortOrder     Int     @default(0)
+
+  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  @@index([serviceTypeId, sortOrder])
+}
+
+model ChecklistTemplate {
+  id            String  @id @default(cuid())
+  name          String
+  propertyKind  String  @default("APARTAMENTO") // PropertyKind
+  description   String?
+  serviceTypeId String?
+  isDefault     Boolean @default(false)
+  active        Boolean @default(true)
+  /// RatingScale: como os itens deste modelo são avaliados.
+  ratingScale   String  @default("ESTADO")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  serviceType ServiceType?            @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
+  rooms       ChecklistTemplateRoom[]
+  inspections Inspection[]
+
+  @@index([propertyKind, active])
+}
+
+model ChecklistTemplateRoom {
+  id         String @id @default(cuid())
+  templateId String
+  name       String
+  sortOrder  Int    @default(0)
+
+  template ChecklistTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  items    ChecklistTemplateItem[]
+
+  @@index([templateId, sortOrder])
+}
+
+model ChecklistTemplateItem {
+  id        String  @id @default(cuid())
+  roomId    String
+  label     String
+  category  String? // FindingCategory sugerida ao abrir uma ocorrência aqui
+  sortOrder Int     @default(0)
+
+  room ChecklistTemplateRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, sortOrder])
+}
+
+/// Problemas recorrentes. É a biblioteca que transforma experiência de obra em
+/// velocidade: durante a vistoria, escolher daqui preenche descrição e gravidade.
+model FindingLibrary {
+  id                 String  @id @default(cuid())
+  category           String // FindingCategory
+  title              String
+  defaultDescription String?
+  defaultSeverity    String  @default("MEDIA") // Severity
+  usageCount         Int     @default(0)
+  active             Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category, active])
+}
+
+// ============================================================================
+//  COMERCIAL
+// ============================================================================
+
+model Lead {
+  id            String  @id @default(cuid())
+  name          String
+  phone         String?
+  whatsapp      String?
+  email         String?
+  source        String  @default("SITE") // LeadSource
+  serviceTypeId String?
+  serviceNote   String?
+
+  potentialValueCents Int?
+  status              String  @default("NOVO") // LeadStatus
+  notes               String?
+  lostReason          String?
+
+  nextContactAt DateTime?
+  clientId      String?
+
+  consentAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  serviceType ServiceType?   @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
+  client      Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  activities  LeadActivity[]
+  proposals   Proposal[]
+  attachments MediaAsset[]
+
+  @@index([status, updatedAt])
+  @@index([nextContactAt])
+  @@index([createdAt])
+}
+
+model LeadActivity {
+  id        String   @id @default(cuid())
+  leadId    String
+  channel   String // ContactChannel
+  summary   String
+  outcome   String?
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+}
+
+model Client {
+  id       String  @id @default(cuid())
+  kind     String  @default("PF") // ClientKind
+  name     String
+  document String?
+  email    String?
+  phone    String?
+  whatsapp String?
+
+  addressLine String?
+  district    String?
+  city        String?
+  state       String?
+  zipCode     String?
+
+  notes  String?
+  userId String? @unique
+
+  /// LGPD: momento do consentimento e da eventual solicitação de exclusão.
+  consentAt           DateTime?
+  deletionRequestedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  leads       Lead[]
+  properties  Property[]
+  projects    Project[]
+  inspections Inspection[]
+  proposals   Proposal[]
+  budgets     Budget[]
+  contracts   Contract[]
+  payments    Payment[]
+  events      CalendarEvent[]
+
+  @@index([name])
+}
+
+model Partner {
+  id       String  @id @default(cuid())
+  kind     String // PartnerKind
+  name     String
+  document String?
+  email    String?
+  phone    String?
+  whatsapp String?
+  notes    String?
+  active   Boolean @default(true)
+  userId   String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  projects Project[]
+  stages   Stage[]
+
+  @@index([kind, active])
+}
+
+model Proposal {
+  id            String  @id @default(cuid())
+  number        String  @unique
+  title         String
+  clientId      String?
+  leadId        String?
+  serviceTypeId String?
+  budgetId      String? @unique
+
+  scopeText      String?
+  exclusionsText String?
+  deadlineText   String?
+  paymentTerms   String?
+  notes          String?
+
+  subtotalCents Int @default(0)
+  discountCents Int @default(0)
+  totalCents    Int @default(0)
+
+  status     String    @default("RASCUNHO") // ProposalStatus
+  validUntil DateTime?
+  sentAt     DateTime?
+  viewedAt   DateTime?
+  decidedAt  DateTime?
+
+  /// Token do link público /p/[token]. Nulo enquanto a proposta é rascunho.
+  publicToken String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client      Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  lead        Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  serviceType ServiceType?   @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
+  budget      Budget?        @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+  items       ProposalItem[]
+  contract    Contract?
+  payments    Payment[]
+
+  @@index([status, updatedAt])
+}
+
+model ProposalItem {
+  id             String  @id @default(cuid())
+  proposalId     String
+  description    String
+  detail         String?
+  unit           String  @default("VB") // Unit
+  quantity       Float   @default(1)
+  unitPriceCents Int     @default(0)
+  totalCents     Int     @default(0)
+  sortOrder      Int     @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId, sortOrder])
+}
+
+model Contract {
+  id         String  @id @default(cuid())
+  number     String  @unique
+  title      String
+  clientId   String
+  proposalId String? @unique
+  projectId  String?
+
+  valueCents Int       @default(0)
+  status     String    @default("RASCUNHO") // ContractStatus
+  signedAt   DateTime?
+  fileKey    String?
+  notes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client   Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  proposal Proposal? @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  project  Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+// ============================================================================
+//  IMÓVEL, OBRA E EXECUÇÃO
+// ============================================================================
+
+model Property {
+  id       String  @id @default(cuid())
+  clientId String?
+  kind     String  @default("APARTAMENTO") // PropertyKind
+
+  /// Nome do empreendimento, quando houver (ex.: "Residencial Aurora").
+  development String?
+  tower       String?
+  unit        String?
+
+  addressLine String?
+  district    String?
+  city        String?
+  state       String?
+  zipCode     String?
+
+  areaSqm Float?
+  notes   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client      Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  inspections Inspection[]
+  projects    Project[]
+
+  @@index([clientId])
+  @@index([development])
+}
+
+model Project {
+  id          String  @id @default(cuid())
+  name        String
+  clientId    String
+  propertyId  String?
+  architectId String?
+
+  kind        String    @default("REFORMA") // ProjectKind
+  status      String    @default("PLANEJAMENTO") // ProjectStatus
+  areaSqm     Float?
+  startDate   DateTime?
+  endDate     DateTime?
+  budgetCents Int?
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client    Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  property  Property?       @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  architect Partner?        @relation(fields: [architectId], references: [id], onDelete: SetNull)
+  stages    Stage[]
+  visits    Visit[]
+  budgets   Budget[]
+  contracts Contract[]
+  payments  Payment[]
+  expenses  Expense[]
+  events    CalendarEvent[]
+  media     MediaAsset[]
+  reports   Report[]
+
+  @@index([status, updatedAt])
+}
+
+model Stage {
+  id        String @id @default(cuid())
+  projectId String
+  name      String
+  sortOrder Int    @default(0)
+
+  contractorId String?
+
+  plannedStart    DateTime?
+  plannedEnd      DateTime?
+  plannedPercent  Float     @default(100)
+  executedPercent Float     @default(0)
+
+  valueCents    Int     @default(0)
+  releasedCents Int     @default(0)
+  status        String  @default("NAO_INICIADA") // StageStatus
+  notes         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contractor   Partner?      @relation(fields: [contractorId], references: [id], onDelete: SetNull)
+  measurements Measurement[]
+
+  @@index([projectId, sortOrder])
+}
+
+model Visit {
+  id        String   @id @default(cuid())
+  projectId String
+  visitedAt DateTime
+  summary   String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  measurements Measurement[]
+  findings     Finding[]
+  media        MediaAsset[]
+  reports      Report[]
+
+  @@index([projectId, visitedAt])
+}
+
+model Measurement {
+  id              String  @id @default(cuid())
+  visitId         String
+  stageId         String
+  executedPercent Float   @default(0)
+  approved        Boolean @default(false)
+  releasedCents   Int     @default(0)
+  notes           String?
+
+  createdAt DateTime @default(now())
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  stage Stage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@unique([visitId, stageId])
+}
+
+// ============================================================================
+//  VISTORIA
+// ============================================================================
+
+model Inspection {
+  id            String  @id @default(cuid())
+  code          String  @unique
+  clientId      String?
+  propertyId    String?
+  serviceTypeId String?
+  templateId    String?
+
+  title       String
+  scheduledAt DateTime?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  status      String    @default("AGENDADA") // InspectionStatus
+
+  /// Tipo de documento que esta vistoria vai gerar. Validado contra a
+  /// habilitação profissional em src/lib/compliance antes de gerar o PDF.
+  documentKind String @default("RELATORIO_VISTORIA") // DocumentKind
+
+  /// Cópia da escala do modelo no momento da criação: mudar o modelo depois
+  /// não pode alterar como uma vistoria já feita foi avaliada.
+  ratingScale String @default("ESTADO") // RatingScale
+
+  inspectorName String?
+  contactName   String?
+  contactPhone  String?
+  notes         String?
+  summaryText   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client      Client?            @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  property    Property?          @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  serviceType ServiceType?       @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
+  template    ChecklistTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  rooms       InspectionRoom[]
+  findings    Finding[]
+  media       MediaAsset[]
+  reports     Report[]
+  events      CalendarEvent[]
+
+  @@index([status, scheduledAt])
+  @@index([clientId])
+}
+
+model InspectionRoom {
+  id           String  @id @default(cuid())
+  inspectionId String
+  name         String
+  sortOrder    Int     @default(0)
+  notes        String?
+
+  inspection Inspection       @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  items      InspectionItem[]
+  findings   Finding[]
+
+  @@index([inspectionId, sortOrder])
+}
+
+model InspectionItem {
+  id        String  @id @default(cuid())
+  roomId    String
+  label     String
+  category  String?
+  status    String  @default("PENDENTE") // ChecklistItemStatus
+  notes     String?
+  sortOrder Int     @default(0)
+  /// Item incluído durante a vistoria, fora do modelo original.
+  custom    Boolean @default(false)
+
+  room  InspectionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  media MediaAsset[]
+
+  @@index([roomId, sortOrder])
+}
+
+/// Ocorrência / não conformidade. O registro central da vistoria.
+model Finding {
+  id           String  @id @default(cuid())
+  inspectionId String?
+  visitId      String?
+  roomId       String?
+
+  category     String // FindingCategory
+  title        String
+  description  String?
+  severity     String  @default("MEDIA") // Severity
+  status       String  @default("PENDENTE") // FindingStatus
+  locationNote String?
+  sortOrder    Int     @default(0)
+
+  /// Preenchido quando o texto veio de sugestão de IA e foi aceito pelo usuário.
+  aiAssisted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inspection Inspection?     @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  visit      Visit?          @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  room       InspectionRoom? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  media      MediaAsset[]
+
+  @@index([inspectionId, sortOrder])
+  @@index([severity])
+}
+
+/// Arquivo (foto, vídeo ou documento). Os vínculos são opcionais e mutuamente
+/// exclusivos na prática — quem cria decide a qual entidade pertence.
+model MediaAsset {
+  id         String  @id @default(cuid())
+  kind       String  @default("FOTO") // MediaKind
+  storageKey String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int     @default(0)
+  width      Int?
+  height     Int?
+  caption    String?
+  sortOrder  Int     @default(0)
+
+  findingId    String?
+  itemId       String?
+  inspectionId String?
+  projectId    String?
+  visitId      String?
+  leadId       String?
+
+  takenAt   DateTime?
+  createdAt DateTime  @default(now())
+
+  finding    Finding?        @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  item       InspectionItem? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  inspection Inspection?     @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  project    Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  visit      Visit?          @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  lead       Lead?           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([findingId, sortOrder])
+  @@index([itemId, sortOrder])
+  @@index([inspectionId])
+}
+
+model Report {
+  id           String @id @default(cuid())
+  number       String @unique
+  title        String
+  documentKind String // DocumentKind
+  status       String @default("GERADO") // ReportStatus
+  version      Int    @default(1)
+
+  inspectionId String?
+  projectId    String?
+  visitId      String?
+
+  storageKey  String?
+  publicToken String?   @unique
+  generatedAt DateTime  @default(now())
+  sentAt      DateTime?
+
+  /// Snapshot do disclaimer legal vigente no momento da geração — o documento
+  /// entregue ao cliente não pode mudar de sentido se a configuração mudar.
+  legalNotice String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inspection Inspection? @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  project    Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  visit      Visit?      @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([inspectionId])
+  @@index([generatedAt])
+}
+
+// ============================================================================
+//  ORÇAMENTO
+// ============================================================================
+
+model Budget {
+  id            String  @id @default(cuid())
+  name          String
+  clientId      String?
+  projectId     String?
+  serviceTypeId String?
+
+  /// Contexto da obra. Sem isso o orçamento é uma planilha sem endereço, e
+  /// comparar dois orçamentos antigos vira adivinhação.
+  projectKind  String? // ProjectKind
+  areaSqm      Float?
+  addressLine  String?
+  city         String?
+  reference    String?
+  deadlineText String?
+
+  bdiPercent Float   @default(25)
+  status     String  @default("RASCUNHO") // BudgetStatus
+  notes      String?
+
+  // Totais em cache, recalculados a cada alteração de item.
+  directCostCents Int @default(0)
+  materialCents   Int @default(0)
+  laborCents      Int @default(0)
+  equipmentCents  Int @default(0)
+  wasteCents      Int @default(0)
+  bdiCents        Int @default(0)
+  saleTotalCents  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client      Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  project     Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  serviceType ServiceType? @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
+  items       BudgetItem[]
+  proposal    Proposal?
+
+  @@index([status, updatedAt])
+}
+
+model BudgetItem {
+  id          String  @id @default(cuid())
+  budgetId    String
+  groupName   String?
+  code        String?
+  description String
+  unit        String  @default("UN") // Unit
+  quantity    Float   @default(1)
+
+  materialUnitCents  Int    @default(0)
+  laborUnitCents     Int    @default(0)
+  equipmentUnitCents Int    @default(0)
+  wastePercent       Float  @default(0)
+  /// Quando nulo, herda o BDI do orçamento.
+  bdiPercent         Float?
+
+  // Derivados, gravados para não recalcular em toda leitura.
+  unitCostCents  Int @default(0)
+  totalCostCents Int @default(0)
+  unitSaleCents  Int @default(0)
+  totalSaleCents Int @default(0)
+
+  sortOrder Int @default(0)
+
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@index([budgetId, sortOrder])
+}
+
+// ============================================================================
+//  AGENDA, TAREFAS E FINANÇAS
+// ============================================================================
+
+model CalendarEvent {
+  id     String @id @default(cuid())
+  type   String // EventType
+  title  String
+  status String @default("AGENDADO") // EventStatus
+
+  startsAt DateTime
+  endsAt   DateTime?
+  allDay   Boolean   @default(false)
+
+  clientId     String?
+  projectId    String?
+  inspectionId String?
+
+  address String?
+  notes   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client     Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  project    Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  inspection Inspection? @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  @@index([startsAt])
+  @@index([type, startsAt])
+}
+
+model Task {
+  id       String    @id @default(cuid())
+  title    String
+  detail   String?
+  dueAt    DateTime?
+  done     Boolean   @default(false)
+  doneAt   DateTime?
+  priority String    @default("NORMAL") // TaskPriority
+
+  /// "MANUAL" ou o gatilho da automação que criou a tarefa.
+  source String @default("MANUAL")
+
+  entityType String?
+  entityId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([done, dueAt])
+  @@index([entityType, entityId])
+}
+
+model Payment {
+  id          String  @id @default(cuid())
+  description String
+  clientId    String?
+  projectId   String?
+  proposalId  String?
+
+  amountCents Int
+  dueDate     DateTime
+  paidAt      DateTime?
+  method      String? // PaymentMethod
+  status      String    @default("PREVISTO") // PaymentStatus
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client   Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  project  Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  proposal Proposal? @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+
+  @@index([status, dueDate])
+  @@index([dueDate])
+}
+
+model Expense {
+  id          String  @id @default(cuid())
+  description String
+  category    String // ExpenseCategory
+  supplier    String?
+  projectId   String?
+
+  amountCents Int
+  dueDate     DateTime
+  paidAt      DateTime?
+  status      String    @default("PREVISTA") // ExpenseStatus
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([status, dueDate])
+  @@index([dueDate])
+}
+
+model Notification {
+  id     String    @id @default(cuid())
+  userId String?
+  kind   String    @default("INFO")
+  title  String
+  body   String?
+  link   String?
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+// ============================================================================
+//  PLATAFORMA: AUTOMAÇÕES E IA
+// ============================================================================
+
+model AutomationRule {
+  id      String  @id @default(cuid())
+  name    String
+  trigger String // AutomationTrigger
+  enabled Boolean @default(true)
+
+  /// JSON: condições adicionais. Vazio = sempre dispara.
+  conditions String?
+  /// JSON: lista de ações { type, ...params }.
+  actions    String
+
+  lastRunAt DateTime?
+  runCount  Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([trigger, enabled])
+}
+
+/// Registro de toda chamada de IA. Existe por três motivos: custo, auditoria e
+/// a regra de produto de que nenhuma saída de IA entra no domínio sem aceite.
+model AIInteraction {
+  id     String  @id @default(cuid())
+  userId String?
+  kind   String // AIInteractionKind
+  model  String?
+
+  inputSummary String
+  output       String?
+  errorMessage String?
+
+  promptTokens     Int?
+  completionTokens Int?
+
+  entityType String?
+  entityId   String?
+
+  acceptedByUser Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([kind, createdAt])
+}
