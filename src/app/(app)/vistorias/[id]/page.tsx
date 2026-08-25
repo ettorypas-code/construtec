@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronRight, FileDown, Info, MapPin, TriangleAlert } from "lucide-react";
+import { ChevronRight, FileDown, Info, MapPin, RotateCcw, TriangleAlert } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { getInspectionOverview } from "@/lib/services/inspections";
 import { getCompanySettings } from "@/lib/services/catalog";
@@ -13,6 +13,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/states";
 import { DeleteButton } from "@/components/ui/delete-button";
 import { SeveritySummary } from "@/components/inspection/severity-summary";
+import { RevisitSheet } from "@/components/inspection/revisit-sheet";
 import {
   AddRoomSheet,
   FinishInspectionSheet,
@@ -20,7 +21,11 @@ import {
 } from "@/components/inspection/inspection-actions";
 import { deleteInspectionAction } from "../actions";
 import { formatDate, formatDateTime } from "@/lib/utils/dates";
-import { ChecklistItemStatus, InspectionStatus, type Severity } from "@/domain/enums";
+import {
+  ChecklistItemStatus,
+  InspectionStatus,
+  type Severity,
+} from "@/domain/enums";
 import {
   documentKindLabels,
   findingCategoryLabels,
@@ -77,6 +82,10 @@ export default async function InspectionPage(props: PageProps<"/vistorias/[id]">
     inspection.itemPhotoCount +
     inspection.findings.reduce((total, finding) => total + finding.media.length, 0);
 
+  const problemItemCount = inspection.problemItemCount;
+  const revisitableCount = problemItemCount + inspection.openFindingCount;
+  const isRevisit = Boolean(inspection.parentInspectionId);
+
   // Vistoria com trabalho dentro exige digitar o código. Refazer significa
   // voltar ao imóvel — que depois da entrega das chaves pode não ser mais
   // possível. Vistoria vazia (a criada por engano) sai com um clique.
@@ -121,6 +130,15 @@ export default async function InspectionPage(props: PageProps<"/vistorias/[id]">
               />
             )}
 
+            {isFinished && !isRevisit && revisitableCount > 0 ? (
+              <RevisitSheet
+                inspectionId={inspection.id}
+                parentCode={inspection.code}
+                itemCount={problemItemCount}
+                findingCount={inspection.openFindingCount}
+              />
+            ) : null}
+
             <DeleteButton
               action={deleteInspectionAction}
               id={inspection.id}
@@ -139,6 +157,11 @@ export default async function InspectionPage(props: PageProps<"/vistorias/[id]">
                   ? `${inspection.reports.length} documento(s) emitido(s), com os links já enviados`
                   : "Nenhum documento emitido",
                 "O compromisso na agenda e as tarefas abertas sobre ela",
+                ...(inspection.revisits.length > 0
+                  ? [
+                      `As ${inspection.revisits.length} revistoria(s) continuam, mas perdem as fotos do "antes"`,
+                    ]
+                  : []),
               ]}
               warning={
                 temTrabalho
@@ -149,6 +172,25 @@ export default async function InspectionPage(props: PageProps<"/vistorias/[id]">
           </>
         }
       />
+
+      {/* Numa revistoria, saber de onde ela veio é a primeira informação:
+          sem isso a tela é um checklist curto e sem explicação. */}
+      {inspection.parent ? (
+        <Card className="border-brand-200 bg-brand-50/40">
+          <CardBody className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <RotateCcw className="size-4 shrink-0 text-brand-600" />
+            <span className="text-sm text-ink-700">
+              Revistoria de conferência das correções apontadas em
+            </span>
+            <Link
+              href={`/vistorias/${inspection.parent.id}`}
+              className="text-sm font-medium text-brand-700 hover:text-brand-800"
+            >
+              {inspection.parent.code}
+            </Link>
+          </CardBody>
+        </Card>
+      ) : null}
 
       {/* Guarda de terminologia: o que o sistema vai emitir e por quê. */}
       {resolution.downgraded || resolution.warnings.length > 0 ? (
@@ -351,6 +393,37 @@ export default async function InspectionPage(props: PageProps<"/vistorias/[id]">
                       </div>
                       <FileDown className="size-4 shrink-0 text-ink-400" />
                     </a>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+
+          {inspection.revisits.length > 0 ? (
+            <Card>
+              <CardHeader title="Revistorias" />
+              <ul className="divide-y divide-ink-100">
+                {inspection.revisits.map((revisit) => (
+                  <li key={revisit.id}>
+                    <Link
+                      href={`/vistorias/${revisit.id}`}
+                      className="flex items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-ink-50 sm:px-5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-ink-800">
+                          {revisit.code}
+                        </p>
+                        <p className="text-xs text-ink-500">
+                          {revisit.scheduledAt ? formatDate(revisit.scheduledAt) : "Sem data"}
+                        </p>
+                      </div>
+                      <Badge
+                        tone={inspectionStatusTones[revisit.status as InspectionStatus]}
+                        dot
+                      >
+                        {inspectionStatusLabels[revisit.status as InspectionStatus]}
+                      </Badge>
+                    </Link>
                   </li>
                 ))}
               </ul>

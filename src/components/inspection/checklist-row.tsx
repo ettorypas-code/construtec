@@ -27,6 +27,12 @@ export type ChecklistItemView = {
   status: string;
   custom: boolean;
   photos: Array<{ id: string; storageKey: string }>;
+  /** Só em revistoria: como o item estava e o que foi fotografado antes. */
+  before?: {
+    status: string;
+    notes: string | null;
+    photos: Array<{ id: string; storageKey: string }>;
+  } | null;
 };
 
 /** Cor de cada avaliação quando selecionada. Reprova o cinza genérico. */
@@ -38,6 +44,9 @@ const statusStyles: Record<string, string> = {
   REGULAR: "border-medium bg-medium-soft text-medium",
   RUIM: "border-high bg-high-soft text-high",
   PESSIMO: "border-critical bg-critical-soft text-critical",
+  CORRIGIDO: "border-success bg-success-soft text-success",
+  CORRIGIDO_PARCIAL: "border-medium bg-medium-soft text-medium",
+  NAO_CORRIGIDO: "border-critical bg-critical-soft text-critical",
   NAO_APLICAVEL: "border-ink-300 bg-ink-100 text-ink-500",
 };
 
@@ -127,6 +136,49 @@ export function ChecklistRow({
 
   return (
     <li className="px-3 py-2.5">
+      {/* Numa revistoria, o "antes" vem antes: quem está de pé no imóvel
+          precisa ver o que foi apontado para saber o que conferir. Sem isso a
+          linha vira um rótulo solto e a conferência vira chute. */}
+      {item.before ? (
+        <div className="mb-2 flex items-start gap-2 rounded-control border border-ink-200 bg-ink-50 px-2.5 py-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-ink-500">
+              Estava assim
+            </p>
+            <p className="mt-0.5 text-sm font-medium text-ink-800">
+              {checklistItemStatusLabels[
+                item.before.status as keyof typeof checklistItemStatusLabels
+              ] ?? item.before.status}
+            </p>
+            {item.before.notes ? (
+              <p className="mt-0.5 text-xs leading-relaxed text-ink-600">{item.before.notes}</p>
+            ) : null}
+          </div>
+
+          {item.before.photos.length > 0 ? (
+            <ul className="flex shrink-0 gap-1">
+              {item.before.photos.map((photo) => (
+                <li key={photo.id}>
+                  <a
+                    href={`/api/arquivos/${photo.storageKey}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Ver foto anterior de ${item.label}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/arquivos/${photo.storageKey}`}
+                      alt={`${item.label} antes`}
+                      className="size-12 rounded border border-ink-200 object-cover"
+                    />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="flex items-start gap-2">
         <span className="min-w-0 flex-1 pt-2 text-sm text-ink-800">
           {item.label}

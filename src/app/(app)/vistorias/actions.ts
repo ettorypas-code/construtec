@@ -16,6 +16,7 @@ import {
   findingUpdateSchema,
   finishInspectionSchema,
   inspectionSchema,
+  revisitSchema,
   roomSchema,
 } from "@/lib/validation/inspection";
 import {
@@ -27,6 +28,7 @@ import {
   deleteInspection,
   setChecklistItemNotes,
   createInspection,
+  createRevisitInspection,
   deleteFinding,
   finishInspection,
   markRoomConforming,
@@ -222,5 +224,23 @@ export const deleteInspectionAction = objectAction({
     revalidatePath("/agenda");
     revalidatePath("/dashboard");
     return { code };
+  },
+});
+
+/**
+ * Criar revistoria.
+ *
+ * Redireciona direto para a revistoria criada: quem clicou já decidiu que vai
+ * voltar ao imóvel, e o passo seguinte é agendar ou começar — não voltar para
+ * a vistoria antiga.
+ */
+export const createRevisitAction = formAction({
+  schema: revisitSchema,
+  handler: async ({ parentId, scheduledAt }, { user }) => {
+    const revisit = await createRevisitInspection(parentId, { scheduledAt }, user.id);
+    revalidatePath("/vistorias");
+    revalidatePath(`/vistorias/${parentId}`);
+    revalidatePath("/agenda");
+    redirect(`/vistorias/${revisit.id}`);
   },
 });

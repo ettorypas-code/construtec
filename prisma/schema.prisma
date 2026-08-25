@@ -584,6 +584,12 @@ model Inspection {
   notes         String?
   summaryText   String?
 
+  /// Preenchido quando esta vistoria é uma revistoria de conferência: aponta
+  /// para a vistoria cujos apontamentos vieram conferir. SetNull porque a
+  /// revistoria continua válida sozinha se a original for apagada — o que ela
+  /// perde é a foto do "antes", não o próprio trabalho.
+  parentInspectionId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -597,8 +603,12 @@ model Inspection {
   reports     Report[]
   events      CalendarEvent[]
 
+  parent   Inspection?  @relation("Revistoria", fields: [parentInspectionId], references: [id], onDelete: SetNull)
+  revisits Inspection[] @relation("Revistoria")
+
   @@index([status, scheduledAt])
   @@index([clientId])
+  @@index([parentInspectionId])
 }
 
 model InspectionRoom {
@@ -626,10 +636,23 @@ model InspectionItem {
   /// Item incluído durante a vistoria, fora do modelo original.
   custom    Boolean @default(false)
 
+  /// Item correspondente na vistoria de origem, quando esta é uma revistoria.
+  sourceItemId String?
+
+  /// Como o item estava avaliado na vistoria de origem. É cópia, e não leitura
+  /// pelo relacionamento, pelo mesmo motivo de `ratingScale` e `legalNotice`:
+  /// se a vistoria original for apagada, a revistoria ainda precisa poder
+  /// dizer "estava péssimo". Perde-se a foto do antes, não o fato.
+  sourceStatus String?
+
   room  InspectionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
   media MediaAsset[]
 
+  source   InspectionItem?  @relation("ItemDeOrigem", fields: [sourceItemId], references: [id], onDelete: SetNull)
+  revisits InspectionItem[] @relation("ItemDeOrigem")
+
   @@index([roomId, sortOrder])
+  @@index([sourceItemId])
 }
 
 /// Ocorrência / não conformidade. O registro central da vistoria.
@@ -650,6 +673,10 @@ model Finding {
   /// Preenchido quando o texto veio de sugestão de IA e foi aceito pelo usuário.
   aiAssisted Boolean @default(false)
 
+  /// Ocorrência correspondente na vistoria de origem, quando esta é a cópia
+  /// levada a uma revistoria para conferência.
+  sourceFindingId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -658,8 +685,12 @@ model Finding {
   room       InspectionRoom? @relation(fields: [roomId], references: [id], onDelete: SetNull)
   media      MediaAsset[]
 
+  source   Finding?  @relation("OcorrenciaDeOrigem", fields: [sourceFindingId], references: [id], onDelete: SetNull)
+  revisits Finding[] @relation("OcorrenciaDeOrigem")
+
   @@index([inspectionId, sortOrder])
   @@index([severity])
+  @@index([sourceFindingId])
 }
 
 /// Arquivo (foto, vídeo ou documento). Os vínculos são opcionais e mutuamente

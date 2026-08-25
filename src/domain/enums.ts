@@ -207,7 +207,12 @@ export const ChecklistItemStatus = {
   RUIM: "RUIM",
   PESSIMO: "PESSIMO",
 
-  // Comum às duas
+  // Escala de conferência de correção (revistoria)
+  CORRIGIDO: "CORRIGIDO",
+  CORRIGIDO_PARCIAL: "CORRIGIDO_PARCIAL",
+  NAO_CORRIGIDO: "NAO_CORRIGIDO",
+
+  // Comum a todas
   NAO_APLICAVEL: "NAO_APLICAVEL",
 } as const;
 export type ChecklistItemStatus = (typeof ChecklistItemStatus)[keyof typeof ChecklistItemStatus];
@@ -215,6 +220,9 @@ export type ChecklistItemStatus = (typeof ChecklistItemStatus)[keyof typeof Chec
 export const RatingScale = {
   CONFORMIDADE: "CONFORMIDADE",
   ESTADO: "ESTADO",
+  /// Usada só em revistoria: o que se avalia não é o estado do item, e sim se
+  /// o que foi apontado antes saiu do lugar.
+  CORRECAO: "CORRECAO",
 } as const;
 export type RatingScale = (typeof RatingScale)[keyof typeof RatingScale];
 
@@ -233,6 +241,12 @@ export const RATING_SCALE_VALUES: Record<RatingScale, readonly ChecklistItemStat
     ChecklistItemStatus.PESSIMO,
     ChecklistItemStatus.NAO_APLICAVEL,
   ],
+  CORRECAO: [
+    ChecklistItemStatus.CORRIGIDO,
+    ChecklistItemStatus.CORRIGIDO_PARCIAL,
+    ChecklistItemStatus.NAO_CORRIGIDO,
+    ChecklistItemStatus.NAO_APLICAVEL,
+  ],
 };
 
 /**
@@ -245,6 +259,10 @@ export const PROBLEM_STATUSES: readonly ChecklistItemStatus[] = [
   ChecklistItemStatus.NAO_CONFORME,
   ChecklistItemStatus.RUIM,
   ChecklistItemStatus.PESSIMO,
+  // Numa revistoria, correção pela metade continua sendo problema aberto — é
+  // exatamente o que o cliente precisa levar de volta para a construtora.
+  ChecklistItemStatus.CORRIGIDO_PARCIAL,
+  ChecklistItemStatus.NAO_CORRIGIDO,
 ];
 
 export function isProblemStatus(status: string): boolean {

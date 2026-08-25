@@ -76,7 +76,14 @@ export async function generateInspectionReport(inspectionId: string, userId: str
           include: {
             items: {
               orderBy: { sortOrder: "asc" },
-              include: { media: { orderBy: { sortOrder: "asc" } } },
+              include: {
+                media: { orderBy: { sortOrder: "asc" } },
+                // O "antes" da revistoria. Limitado a 2: o documento compara,
+                // não reproduz o relatório anterior inteiro.
+                source: {
+                  select: { media: { orderBy: { sortOrder: "asc" }, take: 2 } },
+                },
+              },
             },
           },
         },
@@ -87,6 +94,7 @@ export async function generateInspectionReport(inspectionId: string, userId: str
             media: { orderBy: { sortOrder: "asc" } },
           },
         },
+        parent: { select: { code: true } },
       },
     }),
     getCompanySettings(),
@@ -114,6 +122,7 @@ export async function generateInspectionReport(inspectionId: string, userId: str
   // multiplicaria o tempo de geração.
   const photosByFinding = new Map<string, ReportPhoto[]>();
   const photosByItem = new Map<string, ReportPhoto[]>();
+  const photosBeforeItem = new Map<string, ReportPhoto[]>();
 
   await Promise.all([
     ...inspection.findings.map(async (finding) => {
@@ -122,6 +131,9 @@ export async function generateInspectionReport(inspectionId: string, userId: str
     ...inspection.rooms.flatMap((room) =>
       room.items.map(async (item) => {
         if (item.media.length > 0) photosByItem.set(item.id, await loadPhotos(item.media));
+        if (item.source && item.source.media.length > 0) {
+          photosBeforeItem.set(item.id, await loadPhotos(item.source.media));
+        }
       }),
     ),
   ]);
@@ -133,6 +145,9 @@ export async function generateInspectionReport(inspectionId: string, userId: str
       label: item.label,
       status: item.status,
       photos: photosByItem.get(item.id) ?? [],
+      before: item.sourceStatus
+        ? { status: item.sourceStatus, photos: photosBeforeItem.get(item.id) ?? [] }
+        : null,
     })),
     findings: inspection.findings
       .filter((finding) => finding.roomId === room.id)
@@ -173,6 +188,23 @@ export async function generateInspectionReport(inspectionId: string, userId: str
       .map((item) => ({ room: room.name, label: item.label })),
   );
 
+  const revisitOf = inspection.parent?.code ?? null;
+
+  // Placar da conferência: é o número que o cliente leva para a construtora.
+  const correctionTally = revisitOf
+    ? inspection.rooms
+        .flatMap((room) => room.items)
+        .reduce(
+          (tally, item) => {
+            if (item.status === ChecklistItemStatus.CORRIGIDO) tally.corrigido += 1;
+            else if (item.status === ChecklistItemStatus.CORRIGIDO_PARCIAL) tally.parcial += 1;
+            else if (item.status === ChecklistItemStatus.NAO_CORRIGIDO) tally.naoCorrigido += 1;
+            return tally;
+          },
+          { corrigido: 0, parcial: 0, naoCorrigido: 0 },
+        )
+    : null;
+
   const inspectedAt = inspection.finishedAt ?? inspection.scheduledAt ?? inspection.createdAt;
   const number = await nextReportNumber();
 
@@ -212,6 +244,8 @@ export async function generateInspectionReport(inspectionId: string, userId: str
     pendingChecklist,
     statusLabels: checklistItemStatusLabels,
     itemPhotoCount: [...photosByItem.values()].reduce((total, list) => total + list.length, 0),
+    revisitOf,
+    correctionTally,
     showChecklist:
       resolution.documentKind === DocumentKind.CHECKLIST_ENTREGA ||
       resolution.documentKind === DocumentKind.RELATORIO_VISTORIA,

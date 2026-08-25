@@ -18,6 +18,12 @@ import {
   requiredText,
 } from "./common";
 
+/** Revistoria: nasce da vistoria original, só precisa saber quando será. */
+export const revisitSchema = z.object({
+  parentId: requiredId,
+  scheduledAt: optionalDate,
+});
+
 export const inspectionSchema = z.object({
   title: requiredText("Informe um título para a vistoria", 160),
   clientId: optionalId,

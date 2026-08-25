@@ -13,7 +13,7 @@ import {
   RatingScale,
   Severity,
   SEVERITY_ORDER,
-  type FindingStatus,
+  FindingStatus,
 } from "@/domain/enums";
 
 export type InspectionListItem = {
@@ -170,6 +170,188 @@ export async function createInspection(
   return inspection;
 }
 
+/* ------------------------------ Revistoria ------------------------------- */
+
+/**
+ * Cria a revistoria de conferência de uma vistoria já concluída.
+ *
+ * A revistoria não é uma vistoria nova: é a volta ao mesmo imóvel, depois do
+ * prazo dado à construtora, para conferir apontamento por apontamento o que
+ * saiu do lugar. Por isso ela nasce **só com o que deu problema** — repetir os
+ * 204 itens do checklist obrigaria a reavaliar de novo tudo que já estava certo,
+ * que é justamente o trabalho que não precisa ser refeito.
+ *
+ * Cada item copiado guarda `sourceItemId` (para exibir a foto do antes ao lado)
+ * e `sourceStatus` (para dizer como estava, mesmo que a original seja apagada).
+ * A escala muda para CORRECAO: aqui não se avalia estado, se avalia se foi
+ * resolvido, resolvido pela metade, ou se continua igual.
+ */
+export async function createRevisitInspection(
+  parentId: string,
+  input: { scheduledAt: Date | null },
+  userId: string,
+) {
+  const parent = await db.inspection.findUnique({
+    where: { id: parentId },
+    include: {
+      rooms: {
+        orderBy: { sortOrder: "asc" },
+        include: { items: { orderBy: { sortOrder: "asc" } } },
+      },
+      findings: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
+      _count: { select: { revisits: true } },
+    },
+  });
+
+  if (!parent) throw new BusinessError("Vistoria não encontrada.");
+  if (parent.status !== InspectionStatus.CONCLUIDA) {
+    throw new BusinessError(
+      "A revistoria confere o que foi apontado. Conclua a vistoria original antes.",
+    );
+  }
+  if (parent.parentInspectionId) {
+    throw new BusinessError(
+      "Esta já é uma revistoria. Para uma nova conferência, crie a revistoria a partir da vistoria original.",
+    );
+  }
+
+  // Só volta ao imóvel o que ficou em aberto. Ocorrência já marcada como
+  // corrigida não entra: ela foi resolvida e conferida antes.
+  const openFindings = parent.findings.filter(
+    (finding) => finding.status !== FindingStatus.CORRIGIDO,
+  );
+  const roomsToCopy = parent.rooms
+    .map((room) => ({
+      room,
+      items: room.items.filter((item) => isProblemStatus(item.status)),
+      findings: openFindings.filter((finding) => finding.roomId === room.id),
+    }))
+    .filter((entry) => entry.items.length > 0 || entry.findings.length > 0);
+
+  const looseFindings = openFindings.filter(
+    (finding) => !finding.roomId || !parent.rooms.some((room) => room.id === finding.roomId),
+  );
+
+  if (roomsToCopy.length === 0 && looseFindings.length === 0) {
+    throw new BusinessError(
+      "Nada a conferir: esta vistoria não deixou apontamento em aberto.",
+    );
+  }
+
+  // ADIC-REVISTORIA é um adicional cobrado; deixar a vistoria já apontando para
+  // ele é o que permite faturar a segunda visita sem redigitar nada.
+  const addon = await db.serviceType.findUnique({ where: { code: "ADIC-REVISTORIA" } });
+
+  const sequence = parent._count.revisits + 1;
+  const code = `${parent.code}-R${sequence}`;
+
+  const revisit = await db.inspection.create({
+    data: {
+      code,
+      parentInspectionId: parent.id,
+      ratingScale: RatingScale.CORRECAO,
+      title: `Revistoria ${sequence} — ${parent.title}`,
+      clientId: parent.clientId,
+      propertyId: parent.propertyId,
+      serviceTypeId: addon?.id ?? parent.serviceTypeId,
+      documentKind: parent.documentKind,
+      contactName: parent.contactName,
+      contactPhone: parent.contactPhone,
+      scheduledAt: input.scheduledAt,
+      status: InspectionStatus.AGENDADA,
+      notes:
+        `Conferência das correções apontadas em ${parent.code}. ` +
+        "Cada item traz como estava na vistoria original.",
+    },
+  });
+
+  for (const [index, entry] of roomsToCopy.entries()) {
+    const room = await db.inspectionRoom.create({
+      data: {
+        inspectionId: revisit.id,
+        name: entry.room.name,
+        sortOrder: index,
+      },
+    });
+
+    if (entry.items.length > 0) {
+      await db.inspectionItem.createMany({
+        data: entry.items.map((item, itemIndex) => ({
+          roomId: room.id,
+          label: item.label,
+          category: item.category,
+          sortOrder: itemIndex,
+          custom: item.custom,
+          sourceItemId: item.id,
+          sourceStatus: item.status,
+        })),
+      });
+    }
+
+    for (const [findingIndex, finding] of entry.findings.entries()) {
+      await copyFindingToRevisit(finding, revisit.id, room.id, findingIndex);
+    }
+  }
+
+  for (const [index, finding] of looseFindings.entries()) {
+    await copyFindingToRevisit(finding, revisit.id, null, roomsToCopy.length + index);
+  }
+
+  if (input.scheduledAt) {
+    await db.calendarEvent.create({
+      data: {
+        type: "VISTORIA",
+        title: revisit.title,
+        startsAt: input.scheduledAt,
+        clientId: revisit.clientId,
+        inspectionId: revisit.id,
+      },
+    });
+  }
+
+  await logActivity({
+    userId,
+    action: "inspection.revisit_created",
+    summary: `Revistoria criada: ${revisit.code} (confere ${parent.code})`,
+    entityType: "Inspection",
+    entityId: revisit.id,
+  });
+
+  return revisit;
+}
+
+/** Leva a ocorrência para a revistoria zerada, apontando para a original. */
+async function copyFindingToRevisit(
+  finding: {
+    id: string;
+    category: string;
+    title: string;
+    description: string | null;
+    severity: string;
+    locationNote: string | null;
+  },
+  inspectionId: string,
+  roomId: string | null,
+  sortOrder: number,
+) {
+  await db.finding.create({
+    data: {
+      inspectionId,
+      roomId,
+      sourceFindingId: finding.id,
+      category: finding.category,
+      title: finding.title,
+      description: finding.description,
+      severity: finding.severity,
+      locationNote: finding.locationNote,
+      sortOrder,
+      // Zerada de propósito: a conferência é o trabalho da revistoria, e chegar
+      // com veredito preenchido convida a confirmar sem olhar.
+      status: FindingStatus.PENDENTE,
+    },
+  });
+}
+
 /** Visão geral da vistoria: ambientes, contagens e ocorrências. */
 export async function getInspectionOverview(id: string) {
   const inspection = await db.inspection.findUnique({
@@ -196,6 +378,11 @@ export async function getInspectionOverview(id: string) {
         },
       },
       reports: { orderBy: { generatedAt: "desc" } },
+      parent: { select: { id: true, code: true, title: true } },
+      revisits: {
+        orderBy: { createdAt: "asc" },
+        select: { id: true, code: true, status: true, scheduledAt: true },
+      },
     },
   });
 
@@ -215,6 +402,11 @@ export async function getInspectionOverview(id: string) {
       (total, room) => total + room.items.reduce((sum, item) => sum + item.media.length, 0),
       0,
     ),
+    // O que voltaria numa revistoria: é a conta que decide se a segunda visita
+    // se paga, e é o argumento de venda dela.
+    openFindingCount: inspection.findings.filter(
+      (finding) => finding.status !== FindingStatus.CORRIGIDO,
+    ).length,
   };
 }
 
@@ -223,15 +415,39 @@ export async function getRoomForWork(roomId: string) {
     where: { id: roomId },
     include: {
       inspection: {
-        select: { id: true, code: true, title: true, status: true, ratingScale: true },
+        select: {
+          id: true,
+          code: true,
+          title: true,
+          status: true,
+          ratingScale: true,
+          parentInspectionId: true,
+          parent: { select: { code: true } },
+        },
       },
       items: {
         orderBy: { sortOrder: "asc" },
-        include: { media: { orderBy: { sortOrder: "asc" } } },
+        include: {
+          media: { orderBy: { sortOrder: "asc" } },
+          // Numa revistoria é o "antes": a foto e o veredito da vistoria
+          // original, para conferir olhando, sem trocar de tela.
+          source: {
+            select: {
+              status: true,
+              notes: true,
+              media: { orderBy: { sortOrder: "asc" }, take: 3 },
+            },
+          },
+        },
       },
       findings: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        include: { media: { orderBy: { sortOrder: "asc" } } },
+        include: {
+          media: { orderBy: { sortOrder: "asc" } },
+          source: {
+            select: { media: { orderBy: { sortOrder: "asc" }, take: 3 } },
+          },
+        },
       },
     },
   });

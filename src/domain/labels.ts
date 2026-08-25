@@ -245,6 +245,9 @@ export const checklistItemStatusLabels: Record<ChecklistItemStatus, string> = {
   REGULAR: "Estado regular",
   RUIM: "Mau estado",
   PESSIMO: "Péssimo estado",
+  CORRIGIDO: "Corrigido",
+  CORRIGIDO_PARCIAL: "Corrigido em parte",
+  NAO_CORRIGIDO: "Não corrigido",
   NAO_APLICAVEL: "Não se aplica",
 };
 
@@ -258,6 +261,9 @@ export const checklistItemStatusShort: Record<ChecklistItemStatus, string> = {
   REGULAR: "Reg.",
   RUIM: "Ruim",
   PESSIMO: "Péss.",
+  CORRIGIDO: "OK",
+  CORRIGIDO_PARCIAL: "Parcial",
+  NAO_CORRIGIDO: "Não",
   NAO_APLICAVEL: "N/A",
 };
 
@@ -270,12 +276,16 @@ export const checklistItemStatusTones: Record<ChecklistItemStatus, Tone> = {
   REGULAR: "medium",
   RUIM: "high",
   PESSIMO: "critical",
+  CORRIGIDO: "success",
+  CORRIGIDO_PARCIAL: "medium",
+  NAO_CORRIGIDO: "critical",
   NAO_APLICAVEL: "neutral",
 };
 
 export const ratingScaleLabels: Record<RatingScale, string> = {
   CONFORMIDADE: "Conformidade (imóvel novo)",
   ESTADO: "Estado de conservação (5 níveis)",
+  CORRECAO: "Conferência de correção (revistoria)",
 };
 
 export const ratingScaleHints: Record<RatingScale, string> = {
@@ -283,6 +293,8 @@ export const ratingScaleHints: Record<RatingScale, string> = {
     "Para entrega de imóvel novo: o item foi entregue como deveria, ou é não conformidade.",
   ESTADO:
     "Para locação e cautelar: registra o desgaste de Novo a Péssimo, para comparar depois.",
+  CORRECAO:
+    "Para revistoria: confere se cada apontamento anterior foi resolvido, resolvido pela metade ou continua igual.",
 };
 
 export const findingCategoryLabels: Record<FindingCategory, string> = {

@@ -54,6 +54,20 @@ export default async function RoomWorkPage(
           status: item.status,
           custom: item.custom,
           photos: item.media.map((asset) => ({ id: asset.id, storageKey: asset.storageKey })),
+          before: item.source
+            ? {
+                // sourceStatus é a cópia congelada; item.source.status é a
+                // leitura viva. A cópia manda — ela sobrevive à original.
+                status: item.sourceStatus ?? item.source.status,
+                notes: item.source.notes,
+                photos: item.source.media.map((asset) => ({
+                  id: asset.id,
+                  storageKey: asset.storageKey,
+                })),
+              }
+            : item.sourceStatus
+              ? { status: item.sourceStatus, notes: null, photos: [] }
+              : null,
         }))}
         findings={room.findings.map((finding) => ({
           id: finding.id,

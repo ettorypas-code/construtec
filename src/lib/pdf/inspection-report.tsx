@@ -41,7 +41,13 @@ export type ReportFinding = {
 export type ReportRoom = {
   name: string;
   findings: ReportFinding[];
-  checklist: Array<{ label: string; status: string; photos: ReportPhoto[] }>;
+  checklist: Array<{
+    label: string;
+    status: string;
+    photos: ReportPhoto[];
+    /** Só em revistoria: como o item estava na vistoria conferida. */
+    before?: { status: string; photos: ReportPhoto[] } | null;
+  }>;
 };
 
 export type InspectionReportData = {
@@ -77,6 +83,10 @@ export type InspectionReportData = {
   statusLabels: Record<string, string>;
   /** Total de fotos de estado (fora as de ocorrência). */
   itemPhotoCount: number;
+  /** Preenchido só em revistoria: o código da vistoria que está sendo conferida. */
+  revisitOf: string | null;
+  /** Placar da conferência, para o resumo da revistoria. */
+  correctionTally: { corrigido: number; parcial: number; naoCorrigido: number } | null;
 };
 
 export function InspectionReportDocument({ data }: { data: InspectionReportData }) {
@@ -107,6 +117,65 @@ export function InspectionReportDocument({ data }: { data: InspectionReportData 
           <InfoRow label="Responsável pela vistoria" value={data.inspection.inspectorName} />
           <InfoRow label="Acompanhado por" value={data.inspection.contactName} />
         </View>
+
+        {/* Numa revistoria o placar vem primeiro. É a única linha que a
+            construtora vai ler com atenção, e é o que o cliente usa para
+            cobrar: destes pontos, tantos continuam abertos. */}
+        {data.correctionTally ? (
+          <>
+            <SectionTitle>Resultado da conferência</SectionTitle>
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+              {(
+                [
+                  ["Corrigidos", data.correctionTally.corrigido, pdfColors.brand],
+                  ["Corrigidos em parte", data.correctionTally.parcial, pdfColors.medium],
+                  ["Não corrigidos", data.correctionTally.naoCorrigido, pdfColors.critical],
+                ] as const
+              ).map(([label, count, color]) => (
+                <View
+                  key={label}
+                  style={{
+                    flex: 1,
+                    borderWidth: 1,
+                    borderColor: count > 0 ? color : pdfColors.ink200,
+                    borderRadius: 4,
+                    paddingVertical: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 20,
+                      fontFamily: "Helvetica-Bold",
+                      color: count > 0 ? color : pdfColors.ink300,
+                    }}
+                  >
+                    {count}
+                  </Text>
+                  <Text
+                    style={{
+                      marginTop: 3,
+                      fontSize: 7,
+                      letterSpacing: 0.6,
+                      textTransform: "uppercase",
+                      color: count > 0 ? color : pdfColors.ink400,
+                      textAlign: "center",
+                    }}
+                  >
+                    {label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text style={{ fontSize: 10, color: pdfColors.ink600, marginBottom: 18 }}>
+              {data.correctionTally.parcial + data.correctionTally.naoCorrigido === 0
+                ? `Todos os pontos apontados em ${data.revisitOf} foram corrigidos.`
+                : `Dos pontos apontados em ${data.revisitOf}, ` +
+                  `${data.correctionTally.parcial + data.correctionTally.naoCorrigido} ` +
+                  "seguem pendentes de correção integral."}
+            </Text>
+          </>
+        ) : null}
 
         <SectionTitle>Resumo das não conformidades</SectionTitle>
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 18 }}>
@@ -235,7 +304,17 @@ export function InspectionReportDocument({ data }: { data: InspectionReportData 
 
         {data.showChecklist ? (
           <View style={{ marginBottom: 22 }}>
-            <SectionTitle>Estado verificado por item</SectionTitle>
+            <SectionTitle>
+              {data.revisitOf
+                ? "Conferência item a item"
+                : "Estado verificado por item"}
+            </SectionTitle>
+            {data.revisitOf ? (
+              <Text style={{ fontSize: 9, color: pdfColors.ink600, marginBottom: 6 }}>
+                Cada linha traz como o item estava em {data.revisitOf} e como foi
+                encontrado nesta conferência.
+              </Text>
+            ) : null}
             {data.rooms.map((room) => (
               <View key={room.name} style={{ marginBottom: 12 }} wrap>
                 <Text
@@ -267,11 +346,66 @@ export function InspectionReportDocument({ data }: { data: InspectionReportData 
                           color: checklistColor(item.status),
                         }}
                       >
+                        {item.before ? (
+                          <Text style={{ color: pdfColors.ink400 }}>
+                            {data.statusLabels[item.before.status] ?? item.before.status}
+                            {/* WinAnsi, que e a codificacao da Helvetica embutida
+                                aqui, nao tem a seta U+2192: ela sai como vazio e
+                                o leitor ve dois estados soltos lado a lado. */}
+                            {"  »  "}
+                          </Text>
+                        ) : null}
                         {data.statusLabels[item.status] ?? item.status}
                       </Text>
                     </View>
 
-                    {item.photos.length > 0 ? (
+                    {/* Antes e depois lado a lado. Duas fileiras separadas
+                        deixariam o leitor cruzando a página para comparar —
+                        e comparar é o único motivo deste documento existir. */}
+                    {item.before && item.before.photos.length > 0 ? (
+                      <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+                        <View>
+                          <Text
+                            style={{ fontSize: 7.5, color: pdfColors.ink400, marginBottom: 2 }}
+                          >
+                            ANTES
+                          </Text>
+                          <View style={{ flexDirection: "row", gap: 4 }}>
+                            {item.before.photos.map((photo, index) => (
+                              // eslint-disable-next-line jsx-a11y/alt-text
+                              <Image
+                                key={index}
+                                src={{ data: photo.data, format: photo.format }}
+                                style={comparisonPhoto}
+                              />
+                            ))}
+                          </View>
+                        </View>
+
+                        {item.photos.length > 0 ? (
+                          <View>
+                            <Text
+                              style={{ fontSize: 7.5, color: pdfColors.ink400, marginBottom: 2 }}
+                            >
+                              DEPOIS
+                            </Text>
+                            <View style={{ flexDirection: "row", gap: 4 }}>
+                              {item.photos.map((photo, index) => (
+                                // eslint-disable-next-line jsx-a11y/alt-text
+                                <Image
+                                  key={index}
+                                  src={{ data: photo.data, format: photo.format }}
+                                  style={comparisonPhoto}
+                                />
+                              ))}
+                            </View>
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
+
+                    {item.photos.length > 0 &&
+                    !(item.before && item.before.photos.length > 0) ? (
                       <View
                         style={{
                           flexDirection: "row",
@@ -459,6 +593,15 @@ function SignatureLine({ label, name }: { label: string; name: string | null }) 
   );
 }
 
+const comparisonPhoto = {
+  width: 84,
+  height: 63,
+  objectFit: "cover" as const,
+  borderWidth: 1,
+  borderColor: pdfColors.ink200,
+  borderRadius: 2,
+};
+
 function checklistColor(status: string): string {
   switch (status) {
     case "OK":
@@ -470,8 +613,13 @@ function checklistColor(status: string): string {
       return pdfColors.medium;
     case "RUIM":
       return pdfColors.high;
+    case "CORRIGIDO":
+      return pdfColors.brand;
+    case "CORRIGIDO_PARCIAL":
+      return pdfColors.medium;
     case "NAO_CONFORME":
     case "PESSIMO":
+    case "NAO_CORRIGIDO":
       return pdfColors.critical;
     case "NAO_APLICAVEL":
       return pdfColors.ink400;
