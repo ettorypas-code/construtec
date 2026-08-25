@@ -38,6 +38,17 @@ Em ambas, troque `[YOUR-PASSWORD]` pela senha do passo 1.1.
 
 Na `DATABASE_URL`, mantenha no fim: `?pgbouncer=true&connection_limit=1`
 
+### 1.2.1 Conferir antes de seguir
+
+Cole as duas no `.env` e rode:
+
+```powershell
+npx tsx scripts/verificar-supabase.ts
+```
+
+Ele testa a conexão de verdade e diz em português o que está errado — senha
+incorreta, porta trocada, string cortada. Só siga quando estiver tudo `ok`.
+
 ### 1.3 Criar o bucket de arquivos
 
 **Storage → New bucket**
@@ -61,15 +72,19 @@ no servidor, nunca no navegador.
 
 ---
 
-## 2. Gerar as chaves secretas
+## 2. Chaves secretas
 
-Rode três vezes e guarde cada resultado:
+Para gerar novas, rode três vezes e guarde cada resultado:
 
 ```powershell
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Um valor para cada: `SESSION_SECRET`, `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`, `CRON_SECRET`.
+Um valor para cada: `SESSION_SECRET`, `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`,
+`CRON_SECRET`.
+
+> São só bytes aleatórios, não credenciais de nenhum serviço. Se alguma vazar,
+> gere outra e troque na Vercel: o efeito é derrubar as sessões abertas.
 
 ---
 
@@ -125,6 +140,10 @@ funciona igual e os botões não aparecem.
 
 Clique em **Deploy**. O build roda `prisma migrate deploy` sozinho e cria as 36
 tabelas no Supabase.
+
+> Se o build falhar, o erro quase sempre é de conexão. Rode
+> `npx tsx scripts/verificar-supabase.ts` com as mesmas URLs no `.env` local —
+> ele aponta a causa direto.
 
 ---
 
