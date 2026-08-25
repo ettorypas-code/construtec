@@ -66,10 +66,11 @@ export const supabaseStorageAdapter: StorageAdapter = {
   },
 
   async remove(key) {
-    // Falha ao remover não deve derrubar a operação: o registro no banco já foi
-    // apagado, e o que sobra é um arquivo órfão, não uma inconsistência visível.
+    // Propaga a falha. Engolir aqui deixaria quem chama sem saber se o arquivo
+    // saiu — e foi assim que o log de exclusão passou a contar como removido
+    // arquivo que continuava no bucket. Quem decide tolerar é removeStoredFiles.
     const { error } = await getClient().storage.from(BUCKET).remove([key]);
-    if (error) console.error("[storage] falha ao remover arquivo", key, error.message);
+    if (error) throw new Error(`Falha ao remover ${key}: ${error.message}`);
   },
 };
 

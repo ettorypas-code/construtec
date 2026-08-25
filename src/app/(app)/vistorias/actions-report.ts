@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { objectAction } from "@/lib/actions/action";
 import { requiredId } from "@/lib/validation/common";
-import { generateInspectionReport, markReportSent } from "@/lib/services/reports";
+import {
+  deleteReport,
+  generateInspectionReport,
+  markReportSent,
+} from "@/lib/services/reports";
 
 /**
  * Ações de documento ficam separadas de `actions.ts` porque puxam a cadeia de
@@ -30,5 +34,18 @@ export const markReportSentAction = objectAction({
     await markReportSent(reportId, user.id);
     revalidatePath(`/vistorias/${inspectionId}/relatorio`);
     return { reportId };
+  },
+});
+
+export const deleteReportAction = objectAction({
+  schema: z.object({ id: requiredId }),
+  handler: async ({ id }, { user }) => {
+    const { number, inspectionId } = await deleteReport(id, user.id);
+    if (inspectionId) {
+      revalidatePath(`/vistorias/${inspectionId}`);
+      revalidatePath(`/vistorias/${inspectionId}/relatorio`);
+    }
+    revalidatePath("/dashboard");
+    return { number };
   },
 });

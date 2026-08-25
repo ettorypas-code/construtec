@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { emit } from "@/lib/automation/engine";
 import { logActivity } from "@/lib/services/activity";
 import { BusinessError } from "@/lib/actions/result";
+import { removeStoredFiles } from "@/lib/storage";
 import { LeadStatus, PIPELINE_STAGES, WON_STAGES, type LeadSource } from "@/domain/enums";
 import { leadStatusLabels } from "@/domain/labels";
 import type { LeadInput } from "@/lib/validation/crm";
@@ -356,8 +357,29 @@ export async function convertLeadToClient(
   return client;
 }
 
+/**
+ * Apaga um lead.
+ *
+ * Cascade leva o histórico de contatos e os anexos; propostas ficam (o vínculo
+ * vira nulo), porque uma proposta enviada é documento comercial e não some
+ * junto com o cadastro que a originou. Os arquivos dos anexos precisam ser
+ * removidos à mão — o banco não sabe do storage.
+ */
 export async function deleteLead(id: string, userId: string) {
+  const attachments = await db.mediaAsset.findMany({
+    where: { leadId: id },
+    select: { storageKey: true },
+  });
+
   const lead = await db.lead.delete({ where: { id } });
+
+  // Task aponta por entityType/entityId, sem chave estrangeira — o cascade não
+  // a alcança. Uma tarefa "Entrar em contato" com o lead apagado leva a lugar
+  // nenhum: é lixo na lista do dia, e some junto.
+  await db.task.deleteMany({ where: { entityType: "Lead", entityId: id } });
+
+  await removeStoredFiles(attachments.map((asset) => asset.storageKey));
+
   await logActivity({
     userId,
     action: "lead.deleted",
@@ -365,4 +387,6 @@ export async function deleteLead(id: string, userId: string) {
     entityType: "Lead",
     entityId: lead.id,
   });
+
+  return { name: lead.name };
 }

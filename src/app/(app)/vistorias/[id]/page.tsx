@@ -11,12 +11,14 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/states";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { SeveritySummary } from "@/components/inspection/severity-summary";
 import {
   AddRoomSheet,
   FinishInspectionSheet,
   StartInspectionButton,
 } from "@/components/inspection/inspection-actions";
+import { deleteInspectionAction } from "../actions";
 import { formatDate, formatDateTime } from "@/lib/utils/dates";
 import { ChecklistItemStatus, InspectionStatus, type Severity } from "@/domain/enums";
 import {
@@ -71,6 +73,15 @@ export default async function InspectionPage(props: PageProps<"/vistorias/[id]">
   const isFinished = status === InspectionStatus.CONCLUIDA;
   const latestReport = inspection.reports[0] ?? null;
 
+  const photoCount =
+    inspection.itemPhotoCount +
+    inspection.findings.reduce((total, finding) => total + finding.media.length, 0);
+
+  // Vistoria com trabalho dentro exige digitar o código. Refazer significa
+  // voltar ao imóvel — que depois da entrega das chaves pode não ser mais
+  // possível. Vistoria vazia (a criada por engano) sai com um clique.
+  const temTrabalho = photoCount > 0 || inspection.findings.length > 0;
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -94,20 +105,48 @@ export default async function InspectionPage(props: PageProps<"/vistorias/[id]">
           </span>
         }
         action={
-          isFinished ? (
-            <ButtonLink href={`/vistorias/${inspection.id}/relatorio`}>
-              <FileDown className="size-4" />
-              {latestReport ? "Ver relatório" : "Gerar relatório"}
-            </ButtonLink>
-          ) : status === InspectionStatus.AGENDADA ? (
-            <StartInspectionButton inspectionId={inspection.id} />
-          ) : (
-            <FinishInspectionSheet
-              inspectionId={inspection.id}
-              findingCount={inspection.findings.length}
-              pendingChecklistCount={pendingChecklistCount}
+          <>
+            {isFinished ? (
+              <ButtonLink href={`/vistorias/${inspection.id}/relatorio`}>
+                <FileDown className="size-4" />
+                {latestReport ? "Ver relatório" : "Gerar relatório"}
+              </ButtonLink>
+            ) : status === InspectionStatus.AGENDADA ? (
+              <StartInspectionButton inspectionId={inspection.id} />
+            ) : (
+              <FinishInspectionSheet
+                inspectionId={inspection.id}
+                findingCount={inspection.findings.length}
+                pendingChecklistCount={pendingChecklistCount}
+              />
+            )}
+
+            <DeleteButton
+              action={deleteInspectionAction}
+              id={inspection.id}
+              title="Excluir vistoria"
+              entityLabel={`${inspection.code} — ${inspection.title}`}
+              triggerLabel="Excluir vistoria"
+              confirmLabel="Excluir"
+              confirmWord={temTrabalho ? inspection.code : null}
+              successMessage="Vistoria excluída."
+              redirectTo="/vistorias"
+              consequences={[
+                `${inspection.rooms.length} ambiente(s) e todo o checklist preenchido`,
+                `${inspection.findings.length} ocorrência(s) registrada(s)`,
+                `${photoCount} foto(s) — apagadas também do armazenamento`,
+                inspection.reports.length > 0
+                  ? `${inspection.reports.length} documento(s) emitido(s), com os links já enviados`
+                  : "Nenhum documento emitido",
+                "O compromisso na agenda e as tarefas abertas sobre ela",
+              ]}
+              warning={
+                temTrabalho
+                  ? "Refazer esta vistoria exige voltar ao imóvel. Se as chaves já foram entregues, o acesso pode não existir mais."
+                  : undefined
+              }
             />
-          )
+          </>
         }
       />
 

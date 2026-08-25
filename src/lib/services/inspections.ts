@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { logActivity } from "@/lib/services/activity";
 import { emit } from "@/lib/automation/engine";
 import { BusinessError } from "@/lib/actions/result";
-import { storage } from "@/lib/storage";
+import { removeStoredFiles, storage } from "@/lib/storage";
 import { describeProperty } from "@/lib/services/clients";
 import {
   ChecklistItemStatus,
@@ -604,4 +604,67 @@ export async function listFindingLibrary(category?: string) {
       defaultSeverity: true,
     },
   });
+}
+
+/* ------------------------------ Exclusão -------------------------------- */
+
+/**
+ * Apaga uma vistoria inteira.
+ *
+ * O cascade do banco derruba ambientes, itens, ocorrências, mídias, relatórios
+ * e eventos de agenda. O que ele **não** faz é apagar os arquivos: as fotos e os
+ * PDFs vivem no storage, e sumir com a linha sem sumir com o arquivo deixa lixo
+ * ocupando cota para sempre, sem nada no banco apontando para ele.
+ *
+ * Por isso as chaves são coletadas **antes** do delete — depois não há mais como
+ * descobrir quais eram. A remoção em si é best-effort: se o storage falhar, a
+ * exclusão já aconteceu e refazê-la não é possível; falhar aqui só transformaria
+ * uma operação concluída em erro na tela. O que dá para fazer é registrar.
+ */
+export async function deleteInspection(id: string, userId: string) {
+  const inspection = await db.inspection.findUnique({
+    where: { id },
+    select: { id: true, code: true, title: true },
+  });
+  if (!inspection) throw new BusinessError("Vistoria não encontrada.");
+
+  // Mídia chega à vistoria por três caminhos: direto, pelo item do checklist
+  // (item -> ambiente -> vistoria) e pela ocorrência.
+  const media = await db.mediaAsset.findMany({
+    where: {
+      OR: [
+        { inspectionId: id },
+        { finding: { inspectionId: id } },
+        { item: { room: { inspectionId: id } } },
+      ],
+    },
+    select: { storageKey: true },
+  });
+
+  const reports = await db.report.findMany({
+    where: { inspectionId: id, storageKey: { not: null } },
+    select: { storageKey: true },
+  });
+
+  await db.inspection.delete({ where: { id } });
+
+  // Ver a nota em deleteLead: Task não tem chave estrangeira e sobreviveria.
+  await db.task.deleteMany({ where: { entityType: "Inspection", entityId: id } });
+
+  const keys = [
+    ...media.map((asset) => asset.storageKey),
+    ...reports.map((report) => report.storageKey as string),
+  ];
+  const arquivos = await removeStoredFiles(keys);
+
+  await logActivity({
+    userId,
+    action: "inspection.deleted",
+    summary: `Vistoria removida: ${inspection.code} — ${inspection.title}`,
+    entityType: "Inspection",
+    entityId: inspection.id,
+    metadata: { arquivosRemovidos: arquivos.removed, arquivosOrfaos: arquivos.failed },
+  });
+
+  return { code: inspection.code };
 }

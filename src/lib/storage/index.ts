@@ -60,3 +60,34 @@ export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15 MB
 export function isAllowedUpload(mimeType: string): boolean {
   return [...ALLOWED_IMAGE_TYPES, ...ALLOWED_DOCUMENT_TYPES].includes(mimeType);
 }
+
+/**
+ * Remove vários arquivos sem deixar uma falha derrubar a operação que já foi
+ * concluída no banco.
+ *
+ * Excluir é sempre banco primeiro, storage depois — só o banco sabe quais são
+ * as chaves. Se o storage falhar nesse segundo passo, a linha já não existe e
+ * não há como voltar atrás; propagar o erro só transformaria uma exclusão bem
+ * sucedida em mensagem de falha na tela, com o usuário tentando de novo algo
+ * que já aconteceu.
+ *
+ * Tolerar não é ignorar: devolve quantos saíram de verdade, para que o log de
+ * auditoria registre o que aconteceu e não o que foi tentado.
+ */
+export async function removeStoredFiles(
+  keys: string[],
+): Promise<{ removed: number; failed: number }> {
+  if (keys.length === 0) return { removed: 0, failed: 0 };
+
+  const results = await Promise.allSettled(keys.map((key) => storage.remove(key)));
+
+  const failures = results.flatMap((result, index) =>
+    result.status === "rejected" ? [{ key: keys[index], reason: result.reason }] : [],
+  );
+
+  for (const failure of failures) {
+    console.error(`[storage] arquivo orfao — nao foi removido: ${failure.key}`, failure.reason);
+  }
+
+  return { removed: keys.length - failures.length, failed: failures.length };
+}

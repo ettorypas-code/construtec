@@ -10,6 +10,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/states";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { StatRow } from "@/components/ui/stat";
 import { LeadForm } from "@/components/crm/lead-form";
 import { LeadActivityForm } from "@/components/crm/lead-activity-form";
@@ -32,7 +33,7 @@ import type {
   LeadStatus,
   ProposalStatus,
 } from "@/domain/enums";
-import { updateLeadAction } from "../actions";
+import { deleteLeadAction, updateLeadAction } from "../actions";
 
 export async function generateMetadata(props: PageProps<"/crm/[id]">): Promise<Metadata> {
   const { id } = await props.params;
@@ -77,13 +78,37 @@ export default async function LeadDetailPage(props: PageProps<"/crm/[id]">) {
           </span>
         }
         action={
-          lead.client ? (
-            <ButtonLink href={`/propostas/nova?leadId=${lead.id}`} size="sm">
-              Criar proposta
-            </ButtonLink>
-          ) : (
-            <ConvertLeadSheet leadId={lead.id} leadName={lead.name} />
-          )
+          <>
+            {lead.client ? (
+              <ButtonLink href={`/propostas/nova?leadId=${lead.id}`} size="sm">
+                Criar proposta
+              </ButtonLink>
+            ) : (
+              <ConvertLeadSheet leadId={lead.id} leadName={lead.name} />
+            )}
+
+            <DeleteButton
+              action={deleteLeadAction}
+              id={lead.id}
+              title="Excluir lead"
+              entityLabel={lead.name}
+              triggerLabel="Excluir lead"
+              successMessage="Lead excluído."
+              redirectTo="/crm"
+              consequences={[
+                `${lead.activities.length} registro(s) de contato no histórico`,
+                "Os dados informados no formulário e o aceite de contato",
+                "As tarefas abertas em cima deste lead",
+              ]}
+              warning={
+                lead.proposals.length > 0
+                  ? `As ${lead.proposals.length} proposta(s) enviadas continuam existindo — proposta é documento comercial e não some junto com o cadastro. Só perdem o vínculo com este lead.`
+                  : lead.client
+                    ? "O cliente já cadastrado a partir deste lead continua existindo. Só o registro do funil é apagado."
+                    : undefined
+              }
+            />
+          </>
         }
       />
 

@@ -2,7 +2,7 @@ import "server-only";
 
 import { renderToBuffer } from "@react-pdf/renderer";
 import { db } from "@/lib/db";
-import { storage } from "@/lib/storage";
+import { removeStoredFiles, storage } from "@/lib/storage";
 import { logActivity } from "@/lib/services/activity";
 import { emit } from "@/lib/automation/engine";
 import { BusinessError } from "@/lib/actions/result";
@@ -289,4 +289,34 @@ export async function markReportSent(id: string, userId: string) {
   });
 
   return report;
+}
+
+/**
+ * Apaga um documento emitido.
+ *
+ * Diferente da vistoria, aqui nada de irrecuperável se perde: os dados
+ * continuam na vistoria e o PDF pode ser gerado de novo. O que quebra é o link
+ * público — se o documento já foi enviado ao cliente, o endereço que ele tem
+ * para de funcionar. Por isso `sentAt` volta para a tela de confirmação.
+ */
+export async function deleteReport(id: string, userId: string) {
+  const report = await db.report.findUnique({
+    where: { id },
+    select: { id: true, number: true, storageKey: true, inspectionId: true },
+  });
+  if (!report) throw new BusinessError("Documento não encontrado.");
+
+  await db.report.delete({ where: { id } });
+
+  if (report.storageKey) await removeStoredFiles([report.storageKey]);
+
+  await logActivity({
+    userId,
+    action: "report.deleted",
+    summary: `Documento removido: ${report.number}`,
+    entityType: "Report",
+    entityId: report.id,
+  });
+
+  return { number: report.number, inspectionId: report.inspectionId };
 }

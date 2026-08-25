@@ -47,8 +47,10 @@ export const localStorageAdapter: StorageAdapter = {
     if (!absolutePath) return;
     try {
       await unlink(absolutePath);
-    } catch {
-      // Arquivo já removido: nada a fazer.
+    } catch (error) {
+      // Arquivo que já não existe é sucesso: o objetivo era não ter o arquivo.
+      // Permissão negada ou disco em erro, não — isso precisa aparecer.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   },
 };

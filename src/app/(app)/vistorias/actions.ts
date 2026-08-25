@@ -24,6 +24,7 @@ import {
   attachItemPhotos,
   createFinding,
   deleteChecklistItem,
+  deleteInspection,
   setChecklistItemNotes,
   createInspection,
   deleteFinding,
@@ -203,5 +204,23 @@ export const removeMediaAction = objectAction({
     await removeMedia(id);
     revalidatePath(`/vistorias/${inspectionId}`);
     return { id };
+  },
+});
+
+/**
+ * Excluir vistoria.
+ *
+ * Não redireciona aqui: a tela que chamou é a própria vistoria, e um redirect
+ * de dentro da ação corre contra o revalidate. Quem chama recebe o código e
+ * navega — a confirmação some junto com a página.
+ */
+export const deleteInspectionAction = objectAction({
+  schema: z.object({ id: requiredId }),
+  handler: async ({ id }, { user }) => {
+    const { code } = await deleteInspection(id, user.id);
+    revalidatePath("/vistorias");
+    revalidatePath("/agenda");
+    revalidatePath("/dashboard");
+    return { code };
   },
 });
