@@ -32,6 +32,7 @@ import {
   markRoomConformingAction,
 } from "@/app/(app)/vistorias/actions";
 import { ChecklistRow, type ChecklistItemView } from "./checklist-row";
+import { SyncNotice } from "@/components/offline/sync-badge";
 import { FindingSheet, type LibraryEntry } from "./finding-sheet";
 
 type RoomFinding = {
@@ -99,6 +100,9 @@ export function RoomWork({
 
   return (
     <div className="space-y-4 pb-20">
+      {/* Antes de tudo: é a informação que decide se ele pode sair do imóvel. */}
+      <SyncNotice />
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-ink-500">
           Ambiente {navigation.position} de {navigation.total}

@@ -7,6 +7,7 @@ import { ChevronDown, LogOut, Plus } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Sheet } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils/cn";
+import { SyncBadge } from "@/components/offline/sync-badge";
 import { allNavItems, isActivePath } from "./nav";
 import { logoutAction } from "@/app/(auth)/login/actions";
 
@@ -41,6 +42,8 @@ export function TopBar({ userName }: { userName: string }) {
         <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink-800 lg:text-base">
           {current?.label ?? "Construtec"}
         </p>
+
+        <SyncBadge />
 
         <button
           type="button"

@@ -6,6 +6,7 @@ import { Camera, Loader2, Trash2, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { compressImage } from "@/lib/utils/compress-image";
 import { useToast } from "@/components/ui/toast";
+import { useOffline } from "@/components/offline/offline-provider";
 import {
   ChecklistItemStatus,
   isProblemStatus,
@@ -13,12 +14,7 @@ import {
   type RatingScale,
 } from "@/domain/enums";
 import { checklistItemStatusLabels, checklistItemStatusShort } from "@/domain/labels";
-import {
-  attachItemPhotosAction,
-  removeChecklistItemAction,
-  removeMediaAction,
-  setChecklistItemAction,
-} from "@/app/(app)/vistorias/actions";
+import { removeChecklistItemAction, removeMediaAction } from "@/app/(app)/vistorias/actions";
 
 export type ChecklistItemView = {
   id: string;
@@ -78,6 +74,7 @@ export function ChecklistRow({
 }) {
   const router = useRouter();
   const { toast } = useToast();
+  const { statusPendente, fotosPendentes, enviarStatus, enviarFoto } = useOffline();
   const [, startTransition] = useTransition();
   const [status, setStatus] = useOptimistic(item.status);
   const [uploading, setUploading] = useState(0);
@@ -85,16 +82,27 @@ export function ChecklistRow({
 
   const options = RATING_SCALE_VALUES[ratingScale];
 
+  // A fila manda sobre o servidor: se existe marcação esperando sinal, é ela
+  // que a pessoa fez por último, e é ela que a tela precisa mostrar mesmo
+  // depois de recarregar a página.
+  const statusExibido = statusPendente[item.id] ?? status;
+  const fotosNaFila = fotosPendentes[item.id] ?? 0;
+  const totalFotos = item.photos.length + fotosNaFila;
+
   function choose(next: string) {
     startTransition(async () => {
       setStatus(next);
-      const result = await setChecklistItemAction({
+      const result = await enviarStatus({
+        tipo: "status",
         itemId: item.id,
         inspectionId,
         roomId,
         status: next,
       });
-      if (!result.ok) toast(result.error, "error");
+      // Enfileirado não é erro: o toque valeu, só ainda não subiu. Avisar aqui
+      // a cada item transformaria a vistoria inteira numa fila de alertas — o
+      // aviso de pendências mora no topo da tela, uma vez só.
+      if (!result.ok) toast(result.erro, "error");
     });
   }
 
@@ -102,36 +110,29 @@ export function ChecklistRow({
     const list = Array.from(files);
     setUploading(list.length);
 
-    const keys: string[] = [];
+    let subiuAlguma = false;
+
     for (const file of list) {
+      // A compressão acontece antes da fila de propósito: guardar o original de
+      // 4 MB no aparelho encheria a cota do navegador em poucas fotos, e é a
+      // versão comprimida que vai subir de qualquer forma.
       const { file: compressed } = await compressImage(file);
 
-      const body = new FormData();
-      body.append("file", compressed);
-      body.append("folder", `vistoria-${inspectionId}`);
-      try {
-        const response = await fetch("/api/upload", { method: "POST", body });
-        const payload = (await response.json()) as { key?: string; error?: string };
-        if (!response.ok || !payload.key) throw new Error(payload.error ?? "Falha no envio.");
-        keys.push(payload.key);
-      } catch (error) {
-        toast(error instanceof Error ? error.message : "Falha ao enviar a foto.", "error");
-      }
-    }
-
-    setUploading(0);
-    if (keys.length === 0) return;
-
-    startTransition(async () => {
-      const result = await attachItemPhotosAction({
+      const result = await enviarFoto({
+        tipo: "foto",
         itemId: item.id,
         inspectionId,
         roomId,
-        keys,
+        arquivo: compressed,
+        nomeArquivo: compressed.name || "foto.jpg",
       });
-      if (result.ok) router.refresh();
-      else toast(result.error, "error");
-    });
+
+      if (!result.ok) toast(result.erro, "error");
+      else if (!result.enfileirado) subiuAlguma = true;
+    }
+
+    setUploading(0);
+    if (subiuAlguma) router.refresh();
   }
 
   return (
@@ -187,7 +188,7 @@ export function ChecklistRow({
           ) : null}
         </span>
 
-        {isProblemStatus(status) ? (
+        {isProblemStatus(statusExibido) ? (
           <button
             type="button"
             onClick={onReportProblem}
@@ -204,7 +205,7 @@ export function ChecklistRow({
           aria-label={`Fotografar ${item.label}`}
           className={cn(
             "relative flex size-11 shrink-0 items-center justify-center rounded-control transition-colors",
-            item.photos.length > 0
+            totalFotos > 0
               ? "text-brand-600 hover:bg-brand-50"
               : "text-ink-400 hover:bg-ink-100",
           )}
@@ -214,9 +215,16 @@ export function ChecklistRow({
           ) : (
             <Camera className="size-4" />
           )}
-          {item.photos.length > 0 ? (
-            <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-brand-600 text-[0.5625rem] font-semibold text-white">
-              {item.photos.length}
+          {totalFotos > 0 ? (
+            <span
+              className={cn(
+                "absolute right-1 top-1 flex size-4 items-center justify-center rounded-full text-[0.5625rem] font-semibold text-white",
+                // Contagem em âmbar quando parte das fotos ainda está no
+                // aparelho: a foto existe, só não chegou ao servidor.
+                fotosNaFila > 0 ? "bg-warning" : "bg-brand-600",
+              )}
+            >
+              {totalFotos}
             </span>
           ) : null}
         </button>
@@ -281,7 +289,7 @@ export function ChecklistRow({
         style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
       >
         {options.map((option) => {
-          const selected = status === option;
+          const selected = statusExibido === option;
           return (
             <button
               key={option}
