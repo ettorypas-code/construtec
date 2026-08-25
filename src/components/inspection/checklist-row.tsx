@@ -169,14 +169,16 @@ export function ChecklistRow({
           ) : null}
         </button>
 
-        {item.custom ? (
-          <RemoveItemButton
-            itemId={item.id}
-            label={item.label}
-            inspectionId={inspectionId}
-            roomId={roomId}
-          />
-        ) : null}
+        {/* Vale para qualquer item, não só os incluídos: o modelo é um ponto
+            de partida, e o imóvel real manda. Apartamento de um dormitório não
+            tem "Quarto 2", e deixar o item pendente sujaria o relatório. */}
+        <RemoveItemButton
+          itemId={item.id}
+          label={item.label}
+          inspectionId={inspectionId}
+          roomId={roomId}
+          temFotos={item.photos.length > 0}
+        />
       </div>
 
       <input
@@ -257,32 +259,63 @@ function RemoveItemButton({
   label,
   inspectionId,
   roomId,
+  temFotos,
 }: {
   itemId: string;
   label: string;
   inspectionId: string;
   roomId: string;
+  temFotos: boolean;
 }) {
   const router = useRouter();
   const { toast } = useToast();
   const [pending, startTransition] = useTransition();
+  const [confirmando, setConfirmando] = useState(false);
+
+  function remover() {
+    startTransition(async () => {
+      const result = await removeChecklistItemAction({ itemId, inspectionId, roomId });
+      if (result.ok) {
+        toast("Item removido.");
+        router.refresh();
+      } else {
+        toast(result.error, "error");
+        setConfirmando(false);
+      }
+    });
+  }
+
+  // Item com foto pede confirmação: remover leva as fotos junto, e refazer
+  // significa voltar ao imóvel.
+  if (confirmando) {
+    return (
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={remover}
+          className="h-11 rounded-control bg-danger px-2.5 text-xs font-semibold text-white disabled:opacity-50"
+        >
+          Apagar
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirmando(false)}
+          aria-label="Cancelar remoção"
+          className="flex size-11 items-center justify-center rounded-control text-ink-400 hover:bg-ink-100"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <button
       type="button"
       disabled={pending}
       aria-label={`Remover ${label}`}
-      onClick={() =>
-        startTransition(async () => {
-          const result = await removeChecklistItemAction({ itemId, inspectionId, roomId });
-          if (result.ok) {
-            toast("Item removido.");
-            router.refresh();
-          } else {
-            toast(result.error, "error");
-          }
-        })
-      }
+      onClick={() => (temFotos ? setConfirmando(true) : remover())}
       className="flex size-11 shrink-0 items-center justify-center rounded-control text-ink-300 transition-colors hover:bg-danger-soft hover:text-danger disabled:opacity-50"
     >
       <Trash2 className="size-4" />

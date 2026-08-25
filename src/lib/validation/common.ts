@@ -116,9 +116,20 @@ export function requiredDate(message = "Informe a data") {
     .refine((value) => !Number.isNaN(value.getTime()), "Data inválida");
 }
 
-/** Checkbox HTML: presente = "on"/"true", ausente = undefined. */
+/**
+ * Checkbox HTML.
+ *
+ * Uma checkbox desmarcada **não é enviada** no formulário, e um campo
+ * desabilitado também não. A chave simplesmente não existe no FormData — e é
+ * por isso que aqui vem `.optional()` explícito: sem ele o Zod recusa a
+ * ausência com "expected nonoptional", derrubando a submissão inteira por um
+ * campo que o usuário nem viu.
+ *
+ * Marcada envia "on" (ou o `value` que se der ao input).
+ */
 export const checkboxField = z
-  .union([z.string(), z.boolean(), z.undefined()])
+  .union([z.string(), z.boolean()])
+  .optional()
   .transform((value) => value === true || value === "on" || value === "true");
 
 /** Referência opcional a outra entidade (select vazio → null). */

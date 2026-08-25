@@ -55,7 +55,9 @@ export function LeadForm({
   }, [state, toast]);
 
   const errors = state && !state.ok ? state.fieldErrors : undefined;
-  const generalError = state && !state.ok && !state.fieldErrors ? state.error : null;
+  // Sempre visível quando a ação falha. Mostrar só erros por campo esconde a
+  // falha inteira quando o campo culpado não está renderizado na tela.
+  const generalError = state && !state.ok ? state.error : null;
 
   return (
     <form action={formAction} className="space-y-6" noValidate>
