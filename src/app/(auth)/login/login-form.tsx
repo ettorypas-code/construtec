@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Field, Input } from "@/components/ui/form";
 import { FormError } from "@/components/ui/states";
 import { SubmitButton } from "@/components/ui/submit-button";
@@ -8,6 +8,10 @@ import type { ActionResult } from "@/lib/actions/result";
 import { loginAction } from "./actions";
 
 export function LoginForm({ redirectTo }: { redirectTo?: string }) {
+  // O React 19 limpa o `<form>` depois de uma action. Sem manter o e-mail em
+  // estado, cada tentativa errada de senha obrigaria a redigitá-lo.
+  const [email, setEmail] = useState("");
+
   const [state, formAction] = useActionState<ActionResult<never> | null, FormData>(
     loginAction,
     null,
@@ -31,6 +35,8 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
           autoComplete="username"
           autoFocus
           placeholder="voce@empresa.com.br"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
           invalid={Boolean(fieldErrors?.email)}
         />
       </Field>
